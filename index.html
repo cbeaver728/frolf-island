@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#2f8cf0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Frolf Island">
+  <title>Frolf Island</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="top">
+      <div id="holeTag">
+        <button id="menuBtn" aria-label="Menu">☰</button>
+        <div><b id="holeNum">HOLE 1</b><span id="holeName"></span></div>
+        <span id="pin"></span>
+      </div>
+      <div id="board"></div>
+    </div>
+    <div id="banner"></div>
+    <div id="popups"></div>
+    <div id="bottom" data-mode="hidden">
+      <div id="meterWrap">
+        <div id="meterBar"><div id="meterFill"></div><div class="tick" style="left:25%"></div><div class="tick" style="left:50%"></div><div class="tick" style="left:75%"></div></div>
+        <div id="meterRange">RANGE 0m</div>
+      </div>
+      <div id="buttons">
+        <button id="loftBtn" aria-label="Launch angle">MID</button>
+        <button id="mapBtn" aria-label="Map view">MAP</button>
+        <button id="swingBtn">SWING</button>
+      </div>
+      <div id="hint">Drag to aim · tap SWING, then HIT!</div>
+    </div>
+  </div>
+
+  <div id="title">
+    <div class="card">
+      <h1><span>FROLF</span> ISLAND</h1>
+      <p class="tag">Whack the seesaw. Launch the frog. Pop bubbles, bounce webs, ride belts, get tossed by elephants!</p>
+      <div id="slots"></div>
+      <div class="row2">
+        <button id="holesBtn">6 holes</button>
+        <button id="playBtn">PLAY ▶</button>
+      </div>
+      <p id="best"></p>
+      <details>
+        <summary>How to play</summary>
+        <ul>
+          <li><b>Aim:</b> drag left/right, or tap the ground where you want to go. <b>MAP</b> shows the whole hole.</li>
+          <li><b>Angle:</b> LOW rolls farther, HIGH stops faster.</li>
+          <li><b>Power:</b> tap SWING, watch the target slide out, then tap HIT!</li>
+          <li><b>Points:</b> bubbles, flies, conveyor belts, swimming, elephant tosses. Chain them for a combo!</li>
+          <li><b>Spider webs</b> bounce your frog high and <b>double</b> every point for the rest of the shot.</li>
+          <li>Sinking it in fewer shots scores way more. Most points after all the holes wins.</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+
+  <div id="summary" class="hidden">
+    <div class="card">
+      <h2 id="sumTitle"></h2>
+      <p id="sumSub"></p>
+      <table id="sumTable"></table>
+      <button id="nextBtn">Next</button>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
