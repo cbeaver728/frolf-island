@@ -23,7 +23,6 @@ const HOP_SPEED = { fairway: 4.4, green: 3.2, rough: 2.4 };
 const HOP_COUNT = { fairway: 2, green: 2, rough: 1, sand: 0 };
 const BOUNCE = { fairway: [0.22, 0.42], green: [0.15, 0.3], rough: [0.12, 0.3] };
 const HOP_VY = 5.2;
-const METER_SPEED = 0.85;     // full sweeps per second
 
 // ---------- renderer / scene ----------
 const canvas = $('game');
@@ -66,6 +65,13 @@ const arcDots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.22, 8, 6),
   new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }), ARC_N);
 arcDots.frustumCulled = false;
 scene.add(arcDots);
+// dotted circle showing how far the frog can reach with the current angle
+const RING_N = 160;
+const rangeRing = new THREE.InstancedMesh(new THREE.SphereGeometry(0.5, 8, 6),
+  new THREE.MeshBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.8 }), RING_N);
+rangeRing.frustumCulled = false;
+rangeRing.visible = false;
+scene.add(rangeRing);
 
 // ---------- state ----------
 const setup = { slots: ['you', 'cpu', 'off', 'off'], holes: 6 };
@@ -75,6 +81,9 @@ try { best = Number(localStorage.getItem('frolf.best')) || 0; } catch { /* stora
 let world = null, players = [], holeList = [], holeIdx = 0, cur = null;
 let phase = 'title', phaseT = 0, time = 0;
 let aimYaw = 0, mapMode = false, meterPh = 0, power = 0, cpuPlan = null, swingFired = false;
+// the target: a heading plus a distance, and the power that lands the frog exactly there
+let aimDist = 30, aimPower = 1, aimMax = 85, meterSpeed = 1;
+const aimLand = new THREE.Vector3();
 let shot = null, firstIn = false;
 const camPos = new THREE.Vector3(0, 40, 60), camLook = new THREE.Vector3();
 const camPosT = new THREE.Vector3(), camLookT = new THREE.Vector3();
@@ -110,7 +119,39 @@ function predict(start, vel, pts) {
   }
   return p;
 }
-function maxRange() { return (VMAX * VMAX * Math.sin((2 * LOFTS[1].deg * Math.PI) / 180)) / G; }
+function maxRange(loft = 1) { return (VMAX * VMAX * Math.sin((2 * LOFTS[loft].deg * Math.PI) / 180)) / G; }
+
+// power (0..1) whose first landing is `d` metres out along `yaw`
+function solvePower(from, yaw, deg, d) {
+  let lo = 0, hi = 1;
+  const start = seatPos(from, yaw);
+  for (let i = 0; i < 16; i++) {
+    const mid = (lo + hi) / 2;
+    if (hdist(predict(start, launchVel(yaw, deg, mid)), from) < d) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+// re-solve the shot after the target moves; clamps the target to what the frog can reach
+const arcPts = [];
+function updateAim() {
+  const deg = LOFTS[cur.loft].deg;
+  const start = seatPos(cur.pos, aimYaw);
+  aimMax = hdist(predict(start, launchVel(aimYaw, deg, 1)), cur.pos);
+  aimDist = Math.min(Math.max(aimDist, 3), aimMax);
+  aimPower = aimDist >= aimMax - 0.01 ? 1 : solvePower(cur.pos, aimYaw, deg, aimDist);
+  arcPts.length = 0;
+  aimLand.copy(predict(start, launchVel(aimYaw, deg, aimPower), arcPts));
+  // longer shots make the power bar run faster
+  meterSpeed = lerp(0.55, 1.45, Math.min(1, aimDist / maxRange(1)));
+  placeRig();
+}
+function setAimPoint(pt) {
+  if (hdist(pt, cur.pos) < 2) return;
+  aimYaw = yawTo(cur.pos, pt);
+  aimDist = hdist(pt, cur.pos);
+  updateAim();
+}
 
 // where a sensible shot from `from` should go: the cup if reachable, else further down the fairway
 function autoTarget(from) {
@@ -158,9 +199,10 @@ function setControls(mode) {
   $('swingBtn').textContent = mode === 'meter' ? 'HIT!' : 'SWING';
   $('mapBtn').classList.toggle('on', mapMode);
 }
-function setMeter(m, range) {
+function setMeter(m) {
   $('meterFill').style.width = `${(m * 100).toFixed(1)}%`;
-  $('meterRange').textContent = `RANGE ${range.toFixed(1)}m`;
+  $('meterWrap').classList.toggle('hot', m >= 0.97);
+  if (cur) $('meterRange').textContent = `TARGET ${aimDist.toFixed(0)}m`;
 }
 
 // ---------- title / setup ----------
@@ -219,7 +261,7 @@ function loadHole() {
   updateBoard();
   phase = 'intro'; phaseT = 0;
   rig.visible = false;
-  reticle.group.visible = false; arcDots.visible = false;
+  reticle.group.visible = false; arcDots.visible = false; rangeRing.visible = false;
   setControls('hidden');
   banner(`Hole ${holeIdx + 1} · ${h.name}`, 'big', 3);
 }
@@ -235,18 +277,17 @@ function nextTurn() {
 }
 
 function beginAim() {
-  aimYaw = yawTo(cur.pos, autoTarget(cur.pos));
   mapMode = false;
   golfer.setColor(cur.def.color);
   golfer.setSwing(-0.6);
   launcher.setTilt(0.3);
   rig.visible = true;
-  placeRig();
+  setAimPoint(autoTarget(cur.pos));
   cur.frog.group.visible = true;
   cur.frog.group.scale.setScalar(1);
   cur.shadow.visible = true;
   power = 0; meterPh = 0;
-  setMeter(0, 0);
+  setMeter(0);
   updateBoard(); updatePin();
   if (cur.cpu) {
     phase = 'cpu'; phaseT = 0;
@@ -282,18 +323,16 @@ function planCpu(p) {
   const toCup = target.equals(world.cup);
   const dist = hdist(p.pos, target);
   const loft = dist < 30 ? 2 : Math.random() < 0.25 ? 0 : 1;
-  const yaw = yawTo(p.pos, target) + (Math.random() - 0.5) * 0.08;
-  // aim the first landing short of the target by roughly how far the frog will bounce and hop on
-  let lo = 0, hi = 1;
-  for (let i = 0; i < 18; i++) {
-    const mid = (lo + hi) / 2;
-    const v = launchVel(yaw, LOFTS[loft].deg, mid);
-    const roll = toCup ? Math.hypot(v.x, v.z) * 0.2 : 0;
-    const land = predict(seatPos(p.pos, yaw), v);
-    if (hdist(land, p.pos) + roll < dist) lo = mid; else hi = mid;
+  const yaw = yawTo(p.pos, target) + (Math.random() - 0.5) * 0.06;
+  // put the target short of the cup by roughly how far the frog will bounce and hop on
+  let d = dist;
+  if (toCup) {
+    const v = launchVel(yaw, LOFTS[loft].deg, solvePower(p.pos, yaw, LOFTS[loft].deg, dist));
+    d = Math.max(3, dist - Math.hypot(v.x, v.z) * 0.2);
   }
-  const pw = Math.min(1, Math.max(0.02, (lo + hi) / 2 + (Math.random() - 0.5) * 0.06));
-  return { yaw, loft, power: pw };
+  // CPUs are good, not perfect, at stopping the bar
+  const stop = Math.random() < 0.35 ? 1 : 0.9 + Math.random() * 0.1;
+  return { yaw, loft, dist: d, stop };
 }
 
 // ---------- shooting ----------
@@ -303,8 +342,16 @@ function startMeter() {
 }
 function meterValue() { return meterPh < 1 ? meterPh : 2 - meterPh; }
 function swing() {
-  power = meterValue();
+  let m = meterValue();
+  // stopping the bar right at the end hits the target exactly; less comes up short
+  const where = seatPos(cur.pos, aimYaw).add(tmp.set(0, 2.2, 0));
+  if (m >= 0.97) { m = 1; popup('PERFECT!', where, 'gold'); }
+  else if (m >= 0.9) popup('Nice!', where, 'note');
+  else popup('Short…', where, 'note');
+  // carry scales ~linearly with (0.05 + 0.95p), so scale that to land at m × the target distance
+  power = Math.max(0, (m * (0.05 + 0.95 * aimPower) - 0.05) / 0.95);
   phase = 'swing'; phaseT = 0; swingFired = false;
+  rangeRing.visible = false;
   cur.strokes++;
   setControls('hidden');
   updateBoard();
@@ -321,7 +368,7 @@ function fire() {
   launcher.setTilt(-0.35);
   sfx.thwack(); sfx.croak();
   phase = 'flight'; phaseT = 0;
-  reticle.group.visible = false; arcDots.visible = false;
+  reticle.group.visible = false; arcDots.visible = false; rangeRing.visible = false;
 }
 
 function award(base, label, pos, cls = '', chain = true) {
@@ -382,7 +429,7 @@ function flyStep(dt) {
     if (dx * dx + dy * dy + dz * dz < 1.8) {
       f.alive = false; world.group.remove(f.model.group);
       sfx.coin();
-      award(50, '', f.pos, 'gold');
+      award(100, s.chain >= 2 ? 'FLY FEAST!' : '', f.pos, 'gold');
       popup('Gulp!', tmp.copy(f.pos).add(tmp2.set(0, 1.2, 0)), 'note');
     }
   }
@@ -527,7 +574,37 @@ function restHere() {
     sfx.hop();
     return;
   }
+  if (leapForFly()) return;
   finish();
+}
+
+// After landing, a hungry frog leaps at the nearest fly in reach, flies through it and keeps
+// going; when it lands again it looks for the next one, so flies chain into a combo.
+const FLY_REACH = 15;
+function leapForFly() {
+  const s = shot, p = s.pos;
+  let best = null, bd = FLY_REACH;
+  for (const f of world.flies) {
+    if (!f.alive || s.used.has(f)) continue;
+    const d = hdist(p, f.pos);
+    if (d >= bd) continue;
+    // don't leap if carrying on past the fly would drop the frog in the sea
+    const over = tmp.copy(f.pos).sub(p).setY(0).multiplyScalar(2).add(p);
+    if (world.surface(over.x, over.z) === 'sea') continue;
+    best = f; bd = d;
+  }
+  if (!best) return false;
+  s.used.add(best);
+  best.targeted = true;
+  // reach the fly at the top of the leap
+  const rise = Math.max(0.6, best.pos.y - (p.y + 0.4) + 0.2);
+  const vy = Math.sqrt(2 * G * rise), t = vy / G;
+  s.vel.set((best.pos.x - p.x) / t, vy, (best.pos.z - p.z) / t);
+  s.state = 'fly'; s.hopping = true; s.hopsLeft = 0;
+  p.y += 0.05;
+  popup('!', tmp.copy(p).add(tmp2.set(0, 1.6, 0)), 'gold');
+  sfx.hop(); sfx.croak();
+  return true;
 }
 
 function beltStep(dt) {
@@ -594,7 +671,7 @@ function swimStep(dt) {
   s.pos.lerpVectors(s.swimFrom, s.swimTo, k);
   if (k < 0.92) s.pos.y = -0.25 + Math.sin(s.timer * 10) * 0.05;
   s.lastDir.set(s.swimTo.x - s.swimFrom.x, 0, s.swimTo.z - s.swimFrom.z).normalize();
-  if (k >= 1) { s.pos.copy(s.swimTo); finish(); }
+  if (k >= 1) { s.pos.copy(s.swimTo); s.state = 'fly'; restHere(); }
 }
 
 function holeOut() {
@@ -615,6 +692,7 @@ function holeOut() {
 
 function finish(holed = false) {
   const s = shot;
+  for (const f of world.flies) f.targeted = false;
   s.state = 'done';
   if (!holed) {
     cur.pos.copy(s.pos);
@@ -670,34 +748,47 @@ $('nextBtn').addEventListener('click', () => {
 });
 
 // ---------- input ----------
+// Behind the frog: drag sideways to turn, drag up/down to move the target farther/closer, tap the
+// ground to put the target there. MAP view: touch or drag anywhere and the target follows your finger.
 let drag = null;
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+function groundAt(e) {
+  ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObject(world.terrain)[0];
+  if (hit) return hit.point;
+  // past the terrain edge: use the sea plane
+  const t = -ray.ray.origin.y / ray.ray.direction.y;
+  return t > 0 ? ray.ray.origin.clone().addScaledVector(ray.ray.direction, t) : null;
+}
+const canAim = () => phase === 'aim' && cur && !cur.cpu;
 canvas.addEventListener('pointerdown', (e) => {
   unlockAudio();
   if (phase === 'intro' && phaseT > 0.3) { phaseT = 99; return; }
   drag = { x: e.clientX, y: e.clientY, moved: 0, id: e.pointerId };
   canvas.setPointerCapture(e.pointerId);
+  if (canAim() && mapMode) { const p = groundAt(e); if (p) setAimPoint(p); }
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!drag || drag.id !== e.pointerId) return;
-  const dx = e.clientX - drag.x;
-  drag.moved += Math.abs(dx) + Math.abs(e.clientY - drag.y);
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.moved += Math.abs(dx) + Math.abs(dy);
   drag.x = e.clientX; drag.y = e.clientY;
-  if ((phase === 'aim' || phase === 'meter') && !cur.cpu) {
-    aimYaw -= dx * (mapMode ? 0.004 : 0.006);
-    placeRig();
+  if (!canAim()) return;
+  if (mapMode) {
+    const p = groundAt(e);
+    if (p) setAimPoint(p);
+  } else {
+    aimYaw -= dx * 0.005;
+    aimDist -= dy * 0.2;
+    updateAim();
   }
 });
-const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
 canvas.addEventListener('pointerup', (e) => {
   if (!drag) return;
   const tap = drag.moved < 10;
   drag = null;
-  if (tap && phase === 'aim' && !cur.cpu) {
-    ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
-    ray.setFromCamera(ndc, camera);
-    const hit = ray.intersectObject(world.terrain)[0];
-    if (hit && hdist(hit.point, cur.pos) > 3) { aimYaw = yawTo(cur.pos, hit.point); placeRig(); }
-  }
+  if (tap && canAim() && !mapMode) { const p = groundAt(e); if (p) setAimPoint(p); }
 });
 canvas.addEventListener('pointercancel', () => { drag = null; });
 
@@ -711,10 +802,11 @@ $('swingBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); onSwi
 $('loftBtn').addEventListener('click', () => {
   if (phase !== 'aim' || cur.cpu) return;
   cur.loft = (cur.loft + 1) % LOFTS.length;
+  updateAim();
   setControls('aim');
 });
 $('mapBtn').addEventListener('click', () => {
-  if (phase !== 'aim' && phase !== 'meter') return;
+  if (phase !== 'aim') return;
   mapMode = !mapMode;
   $('mapBtn').classList.toggle('on', mapMode);
 });
@@ -724,25 +816,24 @@ $('menuBtn').addEventListener('click', () => {
   $('hud').classList.add('hidden');
   $('title').classList.remove('hidden');
   phase = 'title';
-  rig.visible = reticle.group.visible = arcDots.visible = false;
+  rig.visible = reticle.group.visible = arcDots.visible = rangeRing.visible = false;
   players.forEach(p => { p.frog.group.visible = p.shadow.visible = false; });
   renderSetup();
 });
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); onSwing(); }
-  if (phase === 'aim' && e.code === 'ArrowLeft') { aimYaw += 0.03; placeRig(); }
-  if (phase === 'aim' && e.code === 'ArrowRight') { aimYaw -= 0.03; placeRig(); }
+  if (canAim() && e.code === 'ArrowLeft') { aimYaw += 0.03; updateAim(); }
+  if (canAim() && e.code === 'ArrowRight') { aimYaw -= 0.03; updateAim(); }
+  if (canAim() && e.code === 'ArrowUp') { aimDist += 2; updateAim(); }
+  if (canAim() && e.code === 'ArrowDown') { aimDist -= 2; updateAim(); }
 });
 
 // ---------- per-frame ----------
-const arcPts = [];
 const dotM = new THREE.Matrix4();
-function showAim(p) {
-  const start = seatPos(cur.pos, aimYaw);
-  arcPts.length = 0;
-  const land = predict(start, launchVel(aimYaw, LOFTS[cur.loft].deg, p), arcPts);
+function showAim() {
   reticle.group.visible = true;
-  reticle.group.position.copy(land);
+  reticle.group.position.copy(aimLand);
+  reticle.group.scale.setScalar(mapMode ? 2.2 : 1);
   reticle.col.scale.set(1, phase === 'meter' ? 1 : 0.6, 1);
   arcDots.visible = true;
   const step = Math.max(1, Math.floor(arcPts.length / ARC_N));
@@ -753,17 +844,33 @@ function showAim(p) {
   }
   arcDots.count = n;
   arcDots.instanceMatrix.needsUpdate = true;
-  return hdist(land, cur.pos);
+  // reach ring
+  rangeRing.visible = phase === 'aim' || phase === 'cpu';
+  if (rangeRing.visible) {
+    const R = maxRange(cur.loft);
+    for (let i = 0; i < RING_N; i++) {
+      const a = (i / RING_N) * Math.PI * 2;
+      const x = cur.pos.x + Math.sin(a) * R, z = cur.pos.z + Math.cos(a) * R;
+      dotM.makeScale(mapMode ? 2.4 : 1, mapMode ? 2.4 : 1, mapMode ? 2.4 : 1).setPosition(x, Math.max(0, world.height(x, z)) + 0.35, z);
+      rangeRing.setMatrixAt(i, dotM);
+    }
+    rangeRing.instanceMatrix.needsUpdate = true;
+  }
 }
 
 function aimCamera(k = 1) {
   const d = dirOf(aimYaw);
   if (mapMode) {
-    const cx = (world.minX + world.maxX) / 2, cz = (world.minZ + world.maxZ) / 2;
+    // frame the frog and the cup (fixed for the turn, so the view holds still while you drag)
+    const R = maxRange(cur.loft) * 0.6;
+    const x0 = Math.min(cur.pos.x, world.cup.x) - 22, x1 = Math.max(cur.pos.x, world.cup.x) + 22;
+    const z0 = Math.min(cur.pos.z, world.cup.z) - 22, z1 = Math.max(cur.pos.z, world.cup.z) + 22;
+    const W = Math.max(x1 - x0, R), D = Math.max(z1 - z0, R);
     const tan = Math.tan((camera.fov * Math.PI) / 360);
-    const W = world.maxX - world.minX - 60, D = world.maxZ - world.minZ - 60;
-    const H = Math.max(D / 2 / tan, W / 2 / (tan * camera.aspect)) * 0.95;
-    camPosT.set(cx, H, cz + H * 0.3);
+    const H = Math.max(D / 2 / tan, W / 2 / (tan * camera.aspect)) * 1.25;
+    // nudge the picture up so the bottom controls don't cover the frog
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2 + H * tan * 0.22;
+    camPosT.set(cx, H, cz + H * 0.08);
     camLookT.set(cx, 0, cz);
   } else {
     // behind and a little to the right, so the golfer stands off to the left of the shot line
@@ -794,27 +901,28 @@ function tick(dt) {
     if (phaseT > 3.4) { bannerTimer = 0; nextTurn(); }
   } else if (phase === 'aim') {
     aimCamera();
-    const r = showAim(1);
-    $('meterRange').textContent = `MAX ${r.toFixed(0)}m`;
+    showAim();
+    $('meterRange').textContent = `TARGET ${aimDist.toFixed(0)}m`;
   } else if (phase === 'cpu') {
     let d = cpuPlan.yaw - aimYaw;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     aimYaw += d * Math.min(1, dt * 3);
+    aimDist += (cpuPlan.dist - aimDist) * Math.min(1, dt * 3);
     if (phaseT > 0.5) cur.loft = cpuPlan.loft;
-    placeRig();
+    updateAim();
     aimCamera();
-    showAim(1);
-    if (phaseT > 1.4) { aimYaw = cpuPlan.yaw; startMeter(); }
+    showAim();
+    if (phaseT > 1.4) { aimYaw = cpuPlan.yaw; aimDist = cpuPlan.dist; updateAim(); startMeter(); }
   } else if (phase === 'meter') {
     const prev = meterValue();
-    meterPh += dt * METER_SPEED * 2;
-    if (meterPh >= 2) { phase = 'aim'; meterPh = 0; setMeter(0, 0); setControls('aim'); return; }
+    meterPh += dt * meterSpeed;
+    if (meterPh >= 2) { phase = 'aim'; meterPh = 0; setMeter(0); setControls('aim'); popup('Missed — try again', tmp.copy(cur.pos).add(tmp2.set(0, 2.5, 0)), 'note'); return; }
     const m = meterValue();
     if (Math.floor(m * 10) !== Math.floor(prev * 10)) sfx.tick();
     aimCamera();
-    const r = showAim(m);
-    setMeter(m, r);
-    if (cur.cpu && meterPh < 1 && m >= cpuPlan.power) swing();
+    showAim();
+    setMeter(m);
+    if (cur.cpu && (meterPh >= 1 ? 2 - meterPh <= cpuPlan.stop : meterPh >= cpuPlan.stop)) swing();
   } else if (phase === 'swing') {
     const t = phaseT;
     if (t < 0.3) golfer.setSwing(lerp(-0.6, -1.4, ease(t / 0.3)));
@@ -926,7 +1034,9 @@ requestAnimationFrame(frame);
 window.__frolf = {
   step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) tick(dt); renderer.render(scene, camera); },
   get state() { return { phase, hole: holeIdx, cur: cur && cur.def.name, shot: shot && shot.state, players: players.map(p => ({ n: p.def.name, total: p.total, strokes: p.strokes, holed: p.holed })) }; },
-  setAim(yaw, loft) { aimYaw = yaw; if (loft != null) cur.loft = loft; placeRig(); },
+  setAim(yaw, dist, loft) { aimYaw = yaw; if (dist != null) aimDist = dist; if (loft != null) cur.loft = loft; updateAim(); },
+  aimAt(x, z) { setAimPoint(new THREE.Vector3(x, 0, z)); },
+  get aim() { return { yaw: aimYaw, dist: aimDist, max: aimMax, power: aimPower, speed: meterSpeed, land: aimLand.clone() }; },
   get world() { return world; },
   goto(i) { holeIdx = i; loadHole(); },
   map(on = true) { mapMode = on; },

@@ -350,13 +350,22 @@ export class World {
   }
 
   buildFlies() {
+    // flies hang around in little swarms along the fairway so a landing frog can chain them
     this.flies = [];
-    for (let i = 0; i < 5; i++) {
-      const p = this.pointAtS(this.total * (0.15 + 0.75 * this.rand()));
-      const m = M.makeFly();
-      const center = new THREE.Vector3(p.x + (this.rand() - 0.5) * this.width, p.y + 1.6 + this.rand() * 2.5, p.z);
-      this.group.add(m.group);
-      this.flies.push({ center, pos: center.clone(), model: m, alive: true, phase: this.rand() * 6, r: 1.5 + this.rand() * 1.5 });
+    const swarms = Math.max(3, Math.round(this.total / 30));
+    for (let i = 0; i < swarms; i++) {
+      const p = this.pointAtS(this.total * (0.18 + 0.72 * ((i + this.rand() * 0.8) / swarms)));
+      const sx = p.x + (this.rand() - 0.5) * this.width * 1.2, sz = p.z + (this.rand() - 0.5) * 8;
+      const n = 2 + Math.floor(this.rand() * 3);
+      for (let k = 0; k < n; k++) {
+        const x = sx + (this.rand() - 0.5) * 12, z = sz + (this.rand() - 0.5) * 12;
+        const h = this.height(x, z);
+        if (h < 0.3) continue;
+        const m = M.makeFly();
+        const center = new THREE.Vector3(x, h + 1.8 + this.rand() * 2, z);
+        this.group.add(m.group);
+        this.flies.push({ center, pos: center.clone(), model: m, alive: true, targeted: false, phase: this.rand() * 6, r: 0.6 + this.rand() * 1.0 });
+      }
     }
   }
 
@@ -385,6 +394,7 @@ export class World {
     for (const f of this.flies) {
       if (!f.alive) continue;
       const a = time * 1.7 + f.phase;
+      if (f.targeted) { f.model.group.position.copy(f.pos); continue; }  // frozen while a frog leaps at it
       f.pos.set(f.center.x + Math.cos(a) * f.r, f.center.y + Math.sin(a * 2.3) * 0.4, f.center.z + Math.sin(a) * f.r);
       f.model.group.position.copy(f.pos);
       f.model.group.rotation.y = -a;

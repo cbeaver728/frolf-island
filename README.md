@@ -7,10 +7,16 @@ Play: https://cbeaver728.github.io/frolf-island/
 
 ## How it plays
 
-- **Aim** by dragging left/right or tapping the ground. **MAP** shows the whole hole.
+- **Aim**: put the target anywhere inside your reach (the yellow dotted circle). Tap the
+  ground, or drag: sideways turns, up/down moves it farther/closer. In **MAP** view the target
+  follows your finger.
 - **Angle**: LOW rolls farther, MID is the all-rounder, HIGH stops quickly.
-- **Power**: tap SWING, watch the target slide out, tap HIT!
-- **Points**: bubbles (+10 to +300), flies (+50), conveyor rides (+100), swimming out of
+- **Power**: tap SWING to start the bar, tap HIT! as it reaches the end. A full bar lands
+  exactly on the target ("PERFECT!" from 97%); stopping early comes up short. The farther the
+  target, the faster the bar runs.
+- **Flies**: once the frog lands it leaps at any fly within 15 m, keeps going, lands, and leaps
+  at the next one, so a swarm chains into a big combo.
+- **Points**: bubbles (+10 to +300), flies (+100), conveyor rides (+100), swimming out of
   ponds (+100), frog bonks (+150), elephant tosses (+500). Each extra gimmick in one shot
   raises the combo (up to x3).
 - **Spider webs** are trampolines that **double** every point for the rest of the shot,
