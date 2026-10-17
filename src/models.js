@@ -221,12 +221,20 @@ export function makeElephant() {
   const tip = new THREE.Object3D();
   tip.position.y = -0.7;
   parent.add(tip);
-  return { group: g, legs, joints, tip };
+  // everything hangs off a pivot at the back legs so the elephant can rear up
+  const rear = new THREE.Group();
+  rear.position.z = -1.5;
+  const inner = new THREE.Group();
+  inner.position.z = 1.5;
+  while (g.children.length) inner.add(g.children[0]);
+  rear.add(inner);
+  g.add(rear);
+  return { group: g, legs, joints, tip, rear };
 }
 
-// ---------- spider web trampoline ----------
+// ---------- spider web trampoline, stretched just above the ground ----------
 let webTex = null;
-export const WEB_SIZE = 7, WEB_Y = 1.5;
+export const WEB_SIZE = 7, WEB_Y = 0.35;
 export function makeWeb() {
   if (!webTex) {
     webTex = canvasTex(256, 256, (c, w) => {
@@ -254,8 +262,8 @@ export function makeWeb() {
   const g = new THREE.Group();
   const s = WEB_SIZE / 2;
   for (const [x, z] of [[-s, -s], [s, -s], [-s, s], [s, s]]) {
-    g.add(blob(CYL, lam(0x8a5a2b), 0.14, WEB_Y + 3.3, 0.14, x, (WEB_Y + 0.3 - 3) / 2, z));
-    g.add(blob(SPH_LO, lam(0xffd23f), 0.22, 0.22, 0.22, x, WEB_Y + 0.35, z));
+    g.add(blob(CYL, lam(0x8a5a2b), 0.16, 2.6, 0.16, x, WEB_Y + 0.25 - 1.3, z));
+    g.add(blob(SPH_LO, lam(0xffd23f), 0.26, 0.26, 0.26, x, WEB_Y + 0.3, z));
   }
   const web = new THREE.Mesh(new THREE.PlaneGeometry(WEB_SIZE, WEB_SIZE),
     new THREE.MeshBasicMaterial({ map: webTex, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
@@ -276,6 +284,43 @@ export function makeWeb() {
   spider.position.y = WEB_Y;
   g.add(spider);
   return { group: g, spider, web };
+}
+
+// ---------- snake: a big round head that pops in and out of a hole ----------
+export function makeSnake() {
+  const g = new THREE.Group();
+  const hole = new THREE.Mesh(new THREE.CircleGeometry(1.7, 20), new THREE.MeshBasicMaterial({ color: 0x2b1a0e }));
+  hole.rotation.x = -Math.PI / 2; hole.position.y = 0.06;
+  g.add(hole);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.75, 0.22, 6, 20), lam(0x7a5230));
+  rim.rotation.x = Math.PI / 2; rim.position.y = 0.08;
+  g.add(rim);
+  const body = new THREE.Group();
+  g.add(body);
+  const green = lam(0x3fae49), belly = lam(0xf2e05a);
+  for (let i = 0; i < 6; i++) {
+    const r = 0.62 - i * 0.03;
+    body.add(blob(SPH, i % 2 ? belly : green, r, 0.45, r, 0, 0.3 + i * 0.6, 0));
+  }
+  const head = new THREE.Group();
+  head.position.y = 4.1;
+  body.add(head);
+  head.add(blob(SPH, green, 1.25, 1.15, 1.2));
+  head.add(blob(SPH, belly, 0.9, 0.5, 0.7, 0, -0.55, 0.55));
+  for (const sx of [-1, 1]) {
+    head.add(blob(SPH_LO, lam(0xffffff), 0.36, 0.4, 0.25, sx * 0.48, 0.4, 0.95));
+    head.add(blob(SPH_LO, lam(0x111111), 0.15, 0.25, 0.1, sx * 0.5, 0.42, 1.17));
+    head.add(blob(SPH_LO, green, 0.4, 0.15, 0.3, sx * 0.48, 0.82, 0.88));
+  }
+  const mouth = blob(SPH_LO, lam(0x5a0f1f), 0.55, 0.16, 0.2, 0, -0.2, 1.1);
+  head.add(mouth);
+  const tongue = blob(CYL, lam(0xff3355), 0.05, 0.6, 0.05, 0, -0.25, 1.45);
+  tongue.rotation.x = Math.PI / 2;
+  head.add(tongue);
+  const grip = new THREE.Object3D();
+  grip.position.set(0, -0.5, 1.5);
+  head.add(grip);
+  return { group: g, body, head, grip, tongue };
 }
 
 // ---------- conveyor belt: origin at the start, +z toward the end, y=0 is the belt top ----------

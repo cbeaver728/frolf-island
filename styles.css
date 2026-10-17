@@ -27,13 +27,13 @@ button { font-family: var(--font); cursor: pointer; border: 0; touch-action: man
   pointer-events: auto; backdrop-filter: blur(4px);
 }
 #holeTag b { display: block; font-size: 20px; line-height: 1; color: var(--lime); text-shadow: 0 2px 0 #1d5a12; }
-#holeTag span { font-size: 13px; opacity: 0.9; white-space: nowrap; }
+#holeTag span { font-size: 13px; opacity: 0.9; white-space: nowrap; display: block; max-width: 28vw; overflow: hidden; text-overflow: ellipsis; }
 #holeTag #pin { margin-left: 4px; white-space: nowrap; font-weight: 800; font-size: 15px; color: var(--gold); }
 #menuBtn { width: 38px; height: 38px; border-radius: 12px; background: rgba(255,255,255,0.18); color: #fff; font-size: 20px; }
-#board { display: flex; flex-direction: column; gap: 3px; min-width: 128px; }
+#board { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex-shrink: 0; max-width: 46vw; }
 #board .row {
   display: grid; grid-template-columns: 12px 1fr auto 20px; align-items: center; gap: 6px;
-  background: var(--panel); border-radius: 10px; padding: 2px 8px; font-size: 13px; line-height: 1.5; border: 2px solid transparent;
+  background: var(--panel); border-radius: 10px; padding: 2px 7px; font-size: 12.5px; line-height: 1.5; border: 2px solid transparent;
 }
 #board .row.cur { border-color: #fff; background: rgba(12, 40, 70, 0.8); }
 #board .row.done { opacity: 0.75; }
@@ -143,3 +143,20 @@ h2 { margin: 0; font-size: 34px; color: #2f8cf0; }
 #sumTable td:first-child { text-align: left; font-weight: 600; white-space: nowrap; }
 #sumTable td:first-child i { margin-right: 6px; vertical-align: -1px; }
 #nextBtn { width: 100%; }
+
+/* ---------- elephant countdown ---------- */
+#countdown {
+  position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%) scale(0.4); opacity: 0;
+  font-size: clamp(90px, 30vw, 160px); font-weight: 800; color: #fff; line-height: 1; pointer-events: none;
+  text-shadow: -4px -4px 0 var(--ink), 4px -4px 0 var(--ink), -4px 4px 0 var(--ink), 4px 4px 0 var(--ink), 0 9px 0 var(--ink);
+  transition: transform 0.15s cubic-bezier(.3,1.6,.5,1), opacity 0.1s;
+}
+#countdown.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+#countdown.go { color: var(--lime); }
+#pressBtn {
+  position: absolute; left: 50%; bottom: max(40px, calc(env(safe-area-inset-bottom) + 30px)); transform: translateX(-50%);
+  width: min(70vw, 260px); height: 120px; border-radius: 60px; pointer-events: auto;
+  background: #ff4f7b; box-shadow: 0 8px 0 #a3264a; color: #fff; font-size: 32px; font-weight: 800; line-height: 1.05;
+}
+#pressBtn:active { transform: translateX(-50%) translateY(4px); box-shadow: 0 4px 0 #a3264a; }
+.pop.bad { color: #ff8a8a; font-size: 30px; }
