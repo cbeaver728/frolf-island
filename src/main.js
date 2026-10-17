@@ -58,6 +58,7 @@ scene.add(snow);
 const THEMES = {
   tropical: { top: 0x2f8cf0, mid: 0x8fd0ff, low: 0xe4f7ff, fog: 0xd6f1ff, sea: 0x27b0e6, hemiSky: 0xe8f6ff, hemiGround: 0x5c8a3c, snow: false },
   ice: { top: 0x5f8fc4, mid: 0xb8d3ec, low: 0xf2f7fd, fog: 0xe4eef8, sea: 0x2a6890, hemiSky: 0xf2f8ff, hemiGround: 0x9eb2c6, snow: true },
+  lava: { top: 0x2a1022, mid: 0x9a3a24, low: 0xf09048, fog: 0x7a3424, sea: 0xd8401a, hemiSky: 0xffc8a0, hemiGround: 0x4a2a24, snow: true, embers: true },
 };
 function applyTheme(name) {
   const t = THEMES[name] || THEMES.tropical;
@@ -69,12 +70,14 @@ function applyTheme(name) {
   hemi.color.set(t.hemiSky);
   hemi.groundColor.set(t.hemiGround);
   snow.visible = t.snow;
+  snow.material.color.set(t.embers ? 0xff8a2a : 0xffffff);
+  snow.userData.rise = !!t.embers;      // embers float up, snow falls
   document.body.dataset.world = name;
 }
 function makeWorld(key, i) {
   const W = WORLDS[key];
   applyTheme(W.theme);
-  return new World(W.holes[i], i + (key === 'ice' ? 100 : 0), W.theme);
+  return new World(W.holes[i], i + ({ ice: 100, lava: 200 }[key] || 0), W.theme);
 }
 const sun = new THREE.DirectionalLight(0xfff4dd, 1.9);
 sun.position.set(60, 100, 40);
@@ -238,6 +241,10 @@ function autoTarget(from) {
   let s = info.s + R * 0.85;
   let t = world.pointAtS(s);
   while (hdist(from, t) > R && s > info.s + 5) { s -= 4; t = world.pointAtS(s); }
+  // never suggest landing in lava or water: walk back, then sideways, to solid ground
+  const bad = (q) => ['lava', 'sea', 'pond'].includes(world.surface(q.x, q.z));
+  while (bad(t) && s > info.s + 5) { s -= 3; t = world.pointAtS(s); }
+  if (bad(t)) t = world.nearestSafe(t);
   return t;
 }
 
@@ -249,9 +256,13 @@ function updateBoard() {
       <b>${p.total.toLocaleString()}</b><em>${p.holed ? '✓' : `${p.strokes}/${MAX_STROKES}`}</em>
     </div>`).join('');
 }
+function holeValue(p) {
+  return HOLE_BONUS[Math.min(p.strokes + 1, HOLE_BONUS.length - 1)] + (!firstIn && players.length > 1 ? 200 : 0);
+}
 function updatePin() {
   if (!cur || !world) return;
   $('pin').textContent = `PIN ${Math.round(hdist(cur.pos, world.cup))}m`;
+  $('holeVal').textContent = cur.holed ? '' : `⛳ Sink it: +${holeValue(cur).toLocaleString()}`;
 }
 let bannerTimer = 0;
 function banner(text, cls = '', dur = 1.6) {
@@ -365,7 +376,13 @@ function startGame() {
     bag: { goggles: 1, spring: 1, sticky: 1, boots: 1 }, equipped: null,
   }).filter(Boolean);
   players.forEach(p => scene.add(p.frog.group, p.shadow));
-  holeList = WORLDS[setup.world].holes.slice(0, setup.holes);
+  if (setup.world === 'random') {
+    const pool = Object.keys(WORLDS).flatMap(key => WORLDS[key].holes.map((hole, i) => ({ key, i, hole })));
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    holeList = pool.slice(0, setup.holes);
+  } else {
+    holeList = WORLDS[setup.world].holes.slice(0, setup.holes).map((hole, i) => ({ key: setup.world, i, hole }));
+  }
   holeIdx = 0;
   $('title').classList.add('hidden');
   $('hud').classList.remove('hidden');
@@ -374,8 +391,8 @@ function startGame() {
 
 function loadHole() {
   if (world) { scene.remove(world.group); world.dispose(); }
-  const h = holeList[holeIdx];
-  world = makeWorld(setup.world, holeIdx);
+  const entry = holeList[holeIdx], h = entry.hole;
+  world = makeWorld(entry.key, entry.i);
   scene.add(world.group);
   players.forEach((p, i) => {
     p.pos.copy(world.tee);
@@ -389,12 +406,13 @@ function loadHole() {
   $('holeNum').textContent = `HOLE ${holeIdx + 1}`;
   $('holeName').textContent = h.name;
   $('pin').textContent = `${Math.round(world.total)}m`;
+  $('holeVal').textContent = '';
   updateBoard();
   phase = 'intro'; phaseT = 0;
   rig.visible = false;
   reticle.group.visible = false; arcDots.visible = false; rangeRing.visible = false;
   setControls('hidden');
-  banner(`Hole ${holeIdx + 1} · ${h.name}`, 'big', 3);
+  banner(`${setup.world === 'random' ? WORLDS[entry.key].icon + ' ' : ''}Hole ${holeIdx + 1} · ${h.name}`, 'big', 3);
 }
 
 function nextTurn() {
@@ -459,6 +477,7 @@ function planCpu(p) {
   const add = (pt, value, kind, loft = 1) => {
     const d = hdist(p.pos, pt);
     if (d < 8 || d > R) return;
+    if (world.surface(pt.x, pt.z) === 'lava') return;
     const after = hdist(pt, world.cup);
     opts.push({ pt, kind, loft, score: value + (remaining - after) * 2 - urgency * Math.max(0, after - 30) + Math.random() * 150 });
   };
@@ -480,6 +499,7 @@ function planCpu(p) {
   for (const m of world.mysteries) if (!m.used) add(new THREE.Vector3(m.x, m.y, m.z), 300, 'mystery', 2);
   for (const pd of world.pads) add(new THREE.Vector3(pd.x, 0, pd.z), 260, 'pad', 2);
   for (const pt of world.portals) add(new THREE.Vector3(pt.x, pt.y, pt.z), 200, 'portal', 2);
+  for (const [px, pz] of world.platforms) add(new THREE.Vector3(px, world.height(px, pz), pz), 650, 'platform', 3);
   opts.sort((a, b) => b.score - a.score);
   const pick = opts[0] || { pt: autoTarget(p.pos), kind: 'line', loft: 1 };
   const target = pick.pt;
@@ -489,7 +509,7 @@ function planCpu(p) {
   // put the target short of the cup by roughly how far the frog will bounce and hop on
   let d = dist;
   if (!p.equipped) {
-    if ((pick.kind === 'cup' || pick.kind === 'mystery' || pick.kind === 'pad') && dist > 25 && has('sticky')) p.equipped = 'sticky';
+    if ((pick.kind === 'cup' || pick.kind === 'mystery' || pick.kind === 'pad' || pick.kind === 'platform') && dist > 25 && has('sticky')) p.equipped = 'sticky';
     else if (pick.kind === 'flies' && has('goggles')) p.equipped = 'goggles';
     else if (pick.kind === 'line' && has('boots') && Math.random() < 0.3) p.equipped = 'boots';
   }
@@ -771,10 +791,13 @@ function land(h) {
   if (surf === 'sea') {
     s.state = 'oob'; s.timer = 1.4;
     sfx.splash();
-    world.burst(tmp.set(p.x, 0.3, p.z), 0xffffff, 5);
-    banner('SPLASH! Out of bounds', 'bad');
+    world.burst(tmp.set(p.x, 0.3, p.z), world.theme === 'lava' ? 0xff6a1a : 0xffffff, 5);
+    banner(world.theme === 'lava' ? 'SIZZLE! Out of bounds' : 'SPLASH! Out of bounds', 'bad');
     return;
   }
+  if (surf === 'lava') return lavaHop();
+  // rock platforms in the lava are grippy: land on one and you stay put
+  if (world.onPlatform(p.x, p.z) && !s.hopping) { p.y = h; v.set(0, 0, 0); popup('Safe!', p, 'note'); return restHere(); }
   if (surf === 'pond') return startSwim();
   if (!s.contacted) { s.contacted = true; s.hopsLeft = (HOP_COUNT[surf] ?? 1) + (s.item === 'boots' ? 3 : 0); }
   // Sticky Feet: no bouncing, no hopping, stop right here
@@ -834,6 +857,7 @@ function land(h) {
 function restHere() {
   const s = shot, p = s.pos;
   s.state = 'fly';
+  if (world.surface(p.x, p.z) === 'lava') return lavaHop();
   const dc = hdist(p, world.cup);
   const surf = world.surface(p.x, p.z);
   if (!s.hopIn && dc < 2.8 && surf === 'green') {
@@ -862,6 +886,32 @@ function restHere() {
   for (const el of world.elephants) if (!s.used.has(el) && hdist(p, el.pos) < ELEPHANT_R) return startElephant(el);
   if (s.item !== 'sticky' && leapForFly()) return;
   finish();
+}
+
+// ---------- lava: OUCH! Every touch costs points and the frog hops a few feet in a random
+// direction, again and again, until it lands somewhere that isn't lava ----------
+function lavaHop() {
+  const s = shot, p = s.pos;
+  s.lavaHops = (s.lavaHops || 0) + 1;
+  s.curveDone = true;
+  p.y = Math.max(p.y, world.height(p.x, p.z));
+  award(s.lavaHops === 1 ? -50 : -20, s.lavaHops === 1 ? 'HOT HOT HOT!' : '', p);
+  sfx.splash(); sfx.croak();
+  world.burst(tmp.set(p.x, p.y + 0.3, p.z), 0xff6a1a, 3);
+  const safe = world.nearestSafe(p);
+  if (s.lavaHops > 10) {
+    // enough hopping about: one big leap out
+    launchTo(p.clone(), safe.add(tmp.copy(safe).sub(p).setY(0).setLength(1.5)), 60);
+    return;
+  }
+  // mostly random, but the longer it goes on the more often the frog hops toward safety
+  let yaw = Math.random() * Math.PI * 2;
+  if (Math.random() < 0.2 + s.lavaHops * 0.08) yaw = yawTo(p, safe) + (Math.random() - 0.5) * 0.8;
+  const dist = 2.5 + Math.random() * 2.5, vy = 6.5, T = (2 * vy) / G;
+  s.vel.set(Math.sin(yaw) * dist / T, vy, Math.cos(yaw) * dist / T);
+  s.lastDir.copy(dirOf(yaw));
+  s.state = 'fly'; s.hopping = true; s.hopsLeft = 0; s.contacted = true;
+  p.y += 0.05;
 }
 
 // ---------- lily pads: spin round with the frog on board, then fling it somewhere new ----------
@@ -961,7 +1011,7 @@ function leapForFly() {
     if (d >= bd) continue;
     // don't leap if carrying on past the fly would drop the frog in the sea
     const over = tmp.copy(f.pos).sub(p).setY(0).multiplyScalar(2).add(p);
-    if (world.surface(over.x, over.z) === 'sea') continue;
+    if (['sea', 'lava'].includes(world.surface(over.x, over.z)) || world.surface(f.pos.x, f.pos.z) === 'lava') continue;
     best = f; bd = d;
   }
   if (!best) return false;
@@ -1039,6 +1089,7 @@ function slideStep(dt) {
   p.y = h;
   if (v.lengthSq() > 0.25) s.lastDir.set(v.x, 0, v.z).normalize();
   s.vel.set(v.x, 0, v.z);
+  if (world.surface(p.x, p.z, h) === 'lava') { s.state = 'fly'; return lavaHop(); }
   checkPickups(p.x, p.y + 0.4, p.z);
   checkMystery();
   if (checkPortal()) return;
@@ -1276,7 +1327,7 @@ function endHole() {
     $('nextBtn').textContent = 'Play again';
   } else {
     $('sumTitle').textContent = `Hole ${holeIdx + 1} done`;
-    $('sumSub').textContent = holeList[holeIdx].name;
+    $('sumSub').textContent = holeList[holeIdx].hole.name;
     $('nextBtn').textContent = `Hole ${holeIdx + 2} →`;
   }
   $('sumTable').innerHTML = `<tr><th></th>${holeList.slice(0, holeIdx + 1).map((_, i) => `<th>${i + 1}</th>`).join('')}<th>Total</th></tr>` +
@@ -1467,8 +1518,9 @@ function tick(dt) {
   if (snow.visible) {
     const a = snow.geometry.attributes.position;
     for (let i = 0; i < a.count; i++) {
-      let y = a.getY(i) - dt * 3.2;
+      let y = a.getY(i) + (snow.userData.rise ? dt * 2.2 : -dt * 3.2);
       if (y < -5) y += 40;
+      if (y > 35) y -= 40;
       a.setY(i, y);
       a.setX(i, a.getX(i) + Math.sin(time * 0.7 + i) * dt * 0.4);
     }
@@ -1622,7 +1674,8 @@ requestAnimationFrame(frame);
 // title backdrop: show the chosen world's first hole behind the menu
 function showBackdrop() {
   if (world) { scene.remove(world.group); world.dispose(); }
-  world = makeWorld(setup.world, 0);
+  const keys = Object.keys(WORLDS);
+  world = makeWorld(setup.world === 'random' ? keys[Math.floor(Math.random() * keys.length)] : setup.world, 0);
   scene.add(world.group);
   camPos.set(30, 26, 20); camLook.set(0, 0, -60);
   camPosT.copy(camPos); camLookT.copy(camLook);

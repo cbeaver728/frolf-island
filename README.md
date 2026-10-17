@@ -13,7 +13,15 @@ Pick a world on the title screen:
 - **Ice World**: six snowy arenas with falling snow, snowy pines and icebergs. Ice sheets and
   frozen ponds are slippery, so frogs skid across them instead of hopping. Some ponds are open
   water (with spinning ice floes instead of lily pads). Woolly mammoths, white snakes, fewer flies,
-  and whirlpools on land as well as in water. Best scores are kept per world.
+  and whirlpools on land as well as in water.
+- **Lava World**: six volcanic arenas with dark rock, glowing lava pools, rivers and a lava ring
+  round one green, charred trees, rising embers and a molten sea. Touching lava costs 50 points,
+  then 20 for every hop as the frog bounces about at random until it is out. Rock platforms in
+  the lava are grippy (you stay put) and loaded with big bubbles. Hot springs are normal water.
+- **Random**: each hole is drawn at random from all three worlds.
+
+Best scores are kept per world. The **⛳ Sink it** line (top left) shows what getting in the hole
+is worth on the current shot.
 
 ## How it plays
 
@@ -61,7 +69,7 @@ Pick a world on the title screen:
 
 Zero build step: plain ES modules plus a vendored `three.module.min.js` (r170).
 
-- `src/holes.js` - arena layouts for both worlds (`HOLES`, `ICE_HOLES`, `WORLDS`) (land circles, lakes, streams, mountains, webs, belts,
+- `src/holes.js` - arena layouts for every world (`HOLES`, `ICE_HOLES`, `LAVA_HOLES`, `WORLDS`) (land circles, lakes, streams, mountains, webs, belts,
   elephants, snakes) as plain data.
 - `src/world.js` - heightfield terrain, surfaces, trees, bubbles, gimmick animation.
 - `src/main.js` - turns, aiming, power meter, flight physics, scoring, camera, HUD.

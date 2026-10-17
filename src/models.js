@@ -139,6 +139,32 @@ function merge(parts) {
   return out;
 }
 export const PALM_H = 8, PALM_LEAN = 1.1;
+// charred dead tree for Lava World
+export function makeDeadTreeGeometry() {
+  const trunk = new THREE.CylinderGeometry(0.18, 0.4, 6, 6, 3);
+  trunk.translate(0, 3, 0);
+  const p = trunk.attributes.position;
+  for (let i = 0; i < p.count; i++) p.setX(i, p.getX(i) + 0.25 * Math.sin(p.getY(i) * 0.8));
+  trunk.computeVertexNormals();
+  const parts = [];
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+  const branch = new THREE.CylinderGeometry(0.06, 0.14, 2.4, 5);
+  branch.translate(0, 1.2, 0);
+  for (let i = 0; i < 5; i++) {
+    const yaw = i * 1.3, y = 3 + i * 0.6;
+    e.set(0.9 + (i % 2) * 0.3, yaw, 0, 'YXZ');
+    m.compose(new THREE.Vector3(0, y, 0), q.setFromEuler(e), new THREE.Vector3(1, 1, 1));
+    parts.push({ geo: branch, matrix: m.clone(), color: i % 2 ? 0x2a2220 : 0x3a2c26 });
+  }
+  // glowing embers stuck in the bark
+  const ember = new THREE.SphereGeometry(0.14, 5, 4);
+  for (let i = 0; i < 4; i++) {
+    m.makeTranslation(Math.sin(i * 2) * 0.3, 1.2 + i * 1.1, Math.cos(i * 2) * 0.3);
+    parts.push({ geo: ember, matrix: m.clone(), color: 0xff7a1a });
+  }
+  return { trunk, crown: merge(parts), canopy: new THREE.Vector3(0, 4.6, 0), height: 6.5, crownR: 1.6 };
+}
+
 // snowy pine for Ice World
 export function makePineGeometry() {
   const trunk = new THREE.CylinderGeometry(0.22, 0.34, 3, 6);
@@ -194,9 +220,11 @@ export function makePalmGeometry() {
 }
 
 // ---------- elephant (+z forward) ----------
-export function makeElephant(woolly = false) {
+export function makeElephant(theme = 'tropical') {
+  const woolly = theme === 'ice';
   const g = new THREE.Group();
-  const skin = lam(woolly ? 0x7a4a2b : 0xc49a86), dark = lam(woolly ? 0x4f2e19 : 0x9c7666), ivory = lam(0xfff6e4);
+  const SKIN = { tropical: 0xc49a86, ice: 0x7a4a2b, lava: 0x6e6461 }, DARK = { tropical: 0x9c7666, ice: 0x4f2e19, lava: 0x3d3533 };
+  const skin = lam(SKIN[theme] || SKIN.tropical), dark = lam(DARK[theme] || DARK.tropical), ivory = lam(0xfff6e4);
   if (woolly) {
     // shaggy fur hanging off the body and a tuft on the head
     for (let i = 0; i < 18; i++) {
@@ -318,7 +346,7 @@ export function makeWeb(size = WEB_SIZE) {
 }
 
 // ---------- snake: a big round head that pops in and out of a hole ----------
-export function makeSnake(white = false) {
+export function makeSnake(theme = 'tropical') {
   const g = new THREE.Group();
   const hole = new THREE.Mesh(new THREE.CircleGeometry(1.7, 20), new THREE.MeshBasicMaterial({ color: 0x2b1a0e }));
   hole.rotation.x = -Math.PI / 2; hole.position.y = 0.06;
@@ -328,7 +356,8 @@ export function makeSnake(white = false) {
   g.add(rim);
   const body = new THREE.Group();
   g.add(body);
-  const green = lam(white ? 0xf4f8fc : 0x3fae49), belly = lam(white ? 0xc9d9e8 : 0xf2e05a);
+  const BODY = { tropical: 0x3fae49, ice: 0xf4f8fc, lava: 0xd8341f }, BELLY = { tropical: 0xf2e05a, ice: 0xc9d9e8, lava: 0x2b1b1b };
+  const green = lam(BODY[theme] || BODY.tropical), belly = lam(BELLY[theme] || BELLY.tropical);
   for (let i = 0; i < 6; i++) {
     const r = 0.62 - i * 0.03;
     body.add(blob(SPH, i % 2 ? belly : green, r, 0.45, r, 0, 0.3 + i * 0.6, 0));
@@ -665,7 +694,7 @@ export function makeMystery() {
 }
 
 // ---------- ice floe: Ice World's spinning lily pad ----------
-export function makeIceFloe(r = 2.5) {
+export function makeIceFloe(r = 2.5, color = 0xe8f7ff) {
   const g = new THREE.Group();
   const geo = new THREE.CylinderGeometry(r, r * 0.9, 0.35, 7);
   const p = geo.attributes.position;
@@ -675,7 +704,7 @@ export function makeIceFloe(r = 2.5) {
     p.setX(i, p.getX(i) * k); p.setZ(i, p.getZ(i) * k);
   }
   geo.computeVertexNormals();
-  g.add(new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: 0xe8f7ff, shininess: 80, flatShading: true })));
+  g.add(new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color, shininess: 80, flatShading: true })));
   const crack = blob(new THREE.BoxGeometry(1, 1, 1), lam(0xa9d8f0), r * 1.2, 0.02, 0.08, 0, 0.19, 0);
   crack.rotation.y = 0.7;
   g.add(crack);
@@ -694,7 +723,7 @@ export function makeIceberg(r, h) {
 }
 
 // ---------- falling snow ----------
-export function makeSnow(n = 1400, size = 70) {
+export function makeSnow(n = 1400, size = 70, color = 0xffffff) {
   const pos = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
     pos[i * 3] = (Math.random() - 0.5) * size;
@@ -703,7 +732,7 @@ export function makeSnow(n = 1400, size = 70) {
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.35, map: getGlowTex(),
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ color, size: 0.35, map: getGlowTex(),
     transparent: true, depthWrite: false, opacity: 0.9 }));
   pts.frustumCulled = false;
   pts.userData.size = size;

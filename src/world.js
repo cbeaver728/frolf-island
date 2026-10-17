@@ -40,8 +40,14 @@ const PALETTES = {
     fairway: [0xf4f8fc, 0xe8eff7], green: 0xbfe9d2, rough: 0xd7e1ea, sand: 0xbdb6aa,
     beach: 0xcfc8bb, shallow: 0x8fbcd4, deep: 0x163f60, rock: 0x7f8590, snow: 0xffffff, ice: 0xa9dcf5,
   },
+  lava: {
+    fairway: [0x4d4443, 0x453c3b], green: 0x7c9a4e, rough: 0x332b2a, sand: 0x8c8580,
+    beach: 0x6f6762, shallow: 0x55b8a6, deep: 0x1d5d68, rock: 0x5c4a43, snow: 0xff8a2a, ice: 0xa9dcf5,
+    lava: 0xff4a12, lavaHot: 0xffc43a,
+  },
 };
 export const SNAKE_R = 7.5, ELEPHANT_R = 10;
+const LAVA_Y = 0.25;
 
 export class World {
   constructor(hole, index, theme = 'tropical') {
@@ -59,6 +65,10 @@ export class World {
     this.hills = hole.hills || [];
     this.mountains = hole.mountains || [];
     this.icePatches = hole.ice || [];
+    this.lavaPools = hole.lava || [];
+    this.lavaRings = hole.lavaRings || [];
+    this.lavaRivers = (hole.lavaRivers || []).map(st => ({ w: st.w, pts: st.pts.map(([x, z]) => ({ x, z })) }));
+    this.platforms = hole.platforms || [];
     this.iceH = this.icePatches.map(([x, z]) => this.rawHeight(x, z));
     this.streams = (hole.streams || []).map(st => {
       const pts = st.pts.map(([x, z]) => ({ x, z }));
@@ -152,6 +162,23 @@ export class World {
       const d = polyInfo(st.pts, x, z).d, hw = st.w / 2;
       if (d < hw + 2.5) h = lerp(h, -1.2, smooth(hw + 2.5, hw - 0.5, d));
     }
+    for (const [lx, lz, rx, rz] of this.lavaPools) {
+      const k = Math.hypot((x - lx) / rx, (z - lz) / rz);
+      if (k < 1.3) h = lerp(h, LAVA_Y, smooth(1.3, 0.95, k));
+    }
+    for (const [mx, mz, r1, r2] of this.lavaRings) {
+      const half = (r2 - r1) / 2;
+      const k = Math.abs(Math.hypot(x - mx, z - mz) - (r1 + half)) / half;
+      if (k < 1.25) h = lerp(h, LAVA_Y, smooth(1.25, 0.9, k));
+    }
+    for (const st of this.lavaRivers) {
+      const d = polyInfo(st.pts, x, z).d, hw = st.w / 2;
+      if (d < hw + 2) h = lerp(h, LAVA_Y, smooth(hw + 2, hw - 0.5, d));
+    }
+    for (const [px, pz, r] of this.platforms) {
+      const d = Math.hypot(x - px, z - pz);
+      if (d < r + 1.2) h = lerp(h, LAVA_Y + 1.6, smooth(r + 1.2, r, d));
+    }
     return h;
   }
   normal(x, z) {
@@ -175,8 +202,33 @@ export class World {
     }
     return !!this.streamAt(x, z);
   }
+  onPlatform(x, z) {
+    for (const [px, pz, r] of this.platforms) if (Math.hypot(x - px, z - pz) < r + 0.4) return true;
+    return false;
+  }
+  inLava(x, z) {
+    if (this.onPlatform(x, z)) return false;
+    for (const [lx, lz, rx, rz] of this.lavaPools) if (Math.hypot((x - lx) / rx, (z - lz) / rz) < 1.02) return true;
+    for (const [mx, mz, r1, r2] of this.lavaRings) {
+      const d = Math.hypot(x - mx, z - mz);
+      if (d > r1 - 0.5 && d < r2 + 0.5) return true;
+    }
+    for (const st of this.lavaRivers) if (polyInfo(st.pts, x, z).d < st.w / 2 + 0.5) return true;
+    return false;
+  }
+  // nearest spot that is solid, dry ground (for frogs hopping out of lava)
+  nearestSafe(at) {
+    for (let r = 1; r < 40; r += 1) {
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 10) {
+        const x = at.x + Math.cos(a) * r, z = at.z + Math.sin(a) * r, h = this.height(x, z);
+        if (h > 0.3 && !['lava', 'sea', 'pond'].includes(this.surface(x, z, h))) return new THREE.Vector3(x, h, z);
+      }
+    }
+    return this.tee.clone();
+  }
   surface(x, z, h = this.height(x, z)) {
     if (h < 0.02) return this.inLake(x, z) ? 'pond' : 'sea';
+    if (this.inLava(x, z)) return 'lava';
     const c = this.cup;
     if (this.onIce(x, z)) return 'ice';
     if (Math.hypot(x - c.x, z - c.z) < 11) return 'green';
@@ -219,7 +271,10 @@ export class World {
       const h = this.height(x, z);
       pos.setY(i, h);
       const s = this.surface(x, z, h);
-      if (s === 'ice') {
+      if (s === 'lava') {
+        const k = 0.5 + 0.5 * Math.sin(x * 0.45 + z * 0.3) * Math.sin(z * 0.6 - x * 0.2);
+        c.set(this.colors.lava).lerp(c2.set(this.colors.lavaHot), k * 0.7);
+      } else if (s === 'ice') {
         c.set(this.colors.ice);
         c.offsetHSL(0, 0, Math.sin(x * 0.9 + z * 0.4) * 0.04 + Math.sin(z * 2.1 - x * 0.7) * 0.025);
       } else if (h < 0.02) {
@@ -324,7 +379,7 @@ export class World {
           ok = this.height(x, z) < -0.6 && this.pads.every(p => Math.hypot(p.x - x, p.z - z) > 6);
         }
         if (!ok) continue;
-        const m = this.theme === 'ice' ? M.makeIceFloe() : M.makeLilyPad();
+        const m = this.theme === 'ice' ? M.makeIceFloe() : this.theme === 'lava' ? M.makeIceFloe(2.4, 0x8d8580) : M.makeLilyPad();
         m.group.position.set(x, 0.08, z);
         m.group.rotation.y = this.rand() * 6.28;
         this.group.add(m.group);
@@ -362,7 +417,7 @@ export class World {
 
   buildElephants() {
     this.elephants = (this.hole.elephants || []).map(([x1, z1, x2, z2]) => {
-      const m = M.makeElephant(this.theme === 'ice');
+      const m = M.makeElephant(this.theme);
       const a = new THREE.Vector3(x1, 0, z1), b = new THREE.Vector3(x2, 0, z2);
       const el = { a, b, model: m, pos: a.clone(), t: this.rand(), dirSign: 1, yaw: 0, walk: 0,
         grabT: -1, rear: 0, rearTarget: 0, faceYaw: null, pause: 0 };
@@ -410,7 +465,7 @@ export class World {
 
   buildSnakes() {
     this.snakes = (this.hole.snakes || []).map(([x, z]) => {
-      const m = M.makeSnake(this.theme === 'ice');
+      const m = M.makeSnake(this.theme);
       const y = this.height(x, z);
       m.group.position.set(x, y, z);
       this.group.add(m.group);
@@ -419,9 +474,9 @@ export class World {
   }
 
   buildTrees() {
-    const geo = this.theme === 'ice' ? M.makePineGeometry() : M.makePalmGeometry();
+    const geo = this.theme === 'ice' ? M.makePineGeometry() : this.theme === 'lava' ? M.makeDeadTreeGeometry() : M.makePalmGeometry();
     const max = 140;
-    const trunks = new THREE.InstancedMesh(geo.trunk, M.lam(this.theme === 'ice' ? 0x6b4a32 : 0x9a6b3f), max);
+    const trunks = new THREE.InstancedMesh(geo.trunk, M.lam({ ice: 0x6b4a32, lava: 0x2e2422 }[this.theme] || 0x9a6b3f), max);
     const crowns = new THREE.InstancedMesh(geo.crown, new THREE.MeshLambertMaterial({ vertexColors: true }), max);
     this.trees = [];
     const mat = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
@@ -439,7 +494,7 @@ export class World {
       // the arena stays open: trees ring the shore, plus any groves
       if (!g && (sd < -14 || sd > -3)) continue;
       if (Math.hypot(x - this.cup.x, z - this.cup.z) < 18 || Math.hypot(x - this.tee.x, z - this.tee.z) < 10) continue;
-      if (this.inLake(x, z) || ['green', 'ice'].includes(this.surface(x, z, h))) continue;
+      if (this.inLake(x, z) || ['green', 'ice', 'lava'].includes(this.surface(x, z, h))) continue;
       if (avoid.some(([ax, az, r]) => Math.hypot(x - ax, z - az) < r)) continue;
       if (this.trees.some(t => Math.hypot(t.x - x, t.z - z) < 5.5)) continue;
       const s = 0.8 + this.rand() * 0.45, yaw = this.rand() * Math.PI * 2;
@@ -514,6 +569,15 @@ export class World {
       }
     }
     for (const w of this.webs) this.addBubble(w.x, w.y + (w.big ? 16 : 9), w.z, w.big ? 300 : 50);
+    for (const [px, pz, r] of this.platforms) {
+      const top = this.height(px, pz);
+      const vals = [300, 100, 100, 50];
+      vals.forEach((v, i) => {
+        const a = (i / vals.length) * Math.PI * 2;
+        const rr = i === 0 ? 0 : r * 0.35;
+        this.addBubble(px + Math.cos(a) * rr, top + 1.0 + i * 0.9, pz + Math.sin(a) * rr, v);
+      });
+    }
     for (const b of this.belts) {
       for (let d = 4; d < b.len - 2; d += 6) {
         const q = b.p1.clone().addScaledVector(b.dir, d);
