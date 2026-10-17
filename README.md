@@ -20,7 +20,10 @@ Pick a world on the title screen:
 - **Aim**: put the target anywhere inside your reach (the yellow dotted circle). Tap the
   ground, or drag: sideways turns, up/down moves it farther/closer. In **MAP** view the target
   follows your finger.
-- **Angle**: LOW rolls farther, MID is the all-rounder, HIGH stops quickly.
+- **Shot shape** (arrow pad, or W/S/A/D on a keyboard): up/down tilts the launch angle from 12° to
+  78°. High arcs reach less far but drop onto mountain tops; low arcs skim under things and roll on.
+  Left/right curves the flight (up to about 8 m of bend on a long shot) and it still lands on the
+  target. Curving never adds distance. Tap the middle of the pad to reset.
 - **Power**: tap SWING to start the bar, tap HIT! as it reaches the end. A full bar lands
   exactly on the target ("PERFECT!" from 97%); stopping early comes up short. The farther the
   target, the faster the bar runs.

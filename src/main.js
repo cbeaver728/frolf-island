@@ -11,7 +11,10 @@ const G = 22;                 // gravity, m/s²
 const VMAX = 43.5;            // launch speed at full power (≈85 m carry on MID)
 const CUP_R = 1.0;
 const MAX_STROKES = 8;
-const LOFTS = [{ name: 'LOW', deg: 26 }, { name: 'MID', deg: 42 }, { name: 'HIGH', deg: 58 }];
+const LOFTS = [{ name: 'LOW', deg: 26 }, { name: 'MID', deg: 42 }, { name: 'HIGH', deg: 58 }, { name: 'STEEP', deg: 68 }];  // CPU presets
+// shot shape: the player can tilt the launch angle and bend the flight left or right
+const DEG_MIN = 12, DEG_MAX = 78, DEG_STEP = 3;
+const CURVE_STEP = 0.25, CURVE_K = 20;  // full curve = 20 m/s² of sideways push
 const PLAYER_DEFS = [
   { name: 'Green', color: 0x46c93a, css: '#46c93a' },
   { name: 'Blue', color: 0x3d9cf0, css: '#3d9cf0' },
@@ -121,7 +124,7 @@ let world = null, players = [], holeList = [], holeIdx = 0, cur = null;
 let phase = 'title', phaseT = 0, time = 0;
 let aimYaw = 0, mapMode = false, meterPh = 0, power = 0, cpuPlan = null, swingFired = false;
 // the target: a heading plus a distance, and the power that lands the frog exactly there
-let aimDist = 30, aimPower = 1, aimMax = 85, meterSpeed = 1;
+let aimDist = 30, aimPower = 1, aimMax = 85, meterSpeed = 1, aimLaunch = 0;
 const aimLand = new THREE.Vector3();
 let shot = null, firstIn = false;
 const camPos = new THREE.Vector3(0, 40, 60), camLook = new THREE.Vector3();
@@ -147,11 +150,12 @@ function seatPos(rest, yaw) {
   return new THREE.Vector3(rest.x + Math.sin(yaw) * 1.0, rest.y + 0.2, rest.z + Math.cos(yaw) * 1.0);
 }
 // ballistic preview ignoring gimmicks; fills `pts` with points along the arc
-function predict(start, vel, pts, every = 4) {
+function predict(start, vel, pts, every = 4, curveA = null) {
   const p = start.clone(), v = vel.clone();
   const dt = 1 / 60;
   for (let i = 0; i < 900; i++) {
     v.y -= G * dt;
+    if (curveA) { v.x += curveA.x * dt; v.z += curveA.z * dt; }
     p.addScaledVector(v, dt);
     if (pts && i % every === 0) pts.push(p.clone());
     const h = world.height(p.x, p.z);
@@ -159,15 +163,17 @@ function predict(start, vel, pts, every = 4) {
   }
   return p;
 }
-function maxRange(loft = 1) { return (VMAX * VMAX * boost() * boost() * Math.sin((2 * LOFTS[loft].deg * Math.PI) / 180)) / G; }
+function maxRange(deg = 42) { return (VMAX * VMAX * boost() * boost() * Math.sin((2 * deg * Math.PI) / 180)) / G; }
+// sideways push for a curve: c > 0 bends right (as seen from behind the frog), c < 0 left
+function curveVec(yaw, c) { return c ? new THREE.Vector3(-Math.cos(yaw), 0, Math.sin(yaw)).multiplyScalar(c * CURVE_K) : null; }
 
 // power (0..1) whose first landing is `d` metres out along `yaw`
-function solvePower(from, yaw, deg, d) {
+function solvePower(from, yaw, deg, d, curveA = null) {
   let lo = 0, hi = 1;
   const start = seatPos(from, yaw);
   for (let i = 0; i < 16; i++) {
     const mid = (lo + hi) / 2;
-    if (hdist(predict(start, launchVel(yaw, deg, mid)), from) < d) lo = mid; else hi = mid;
+    if (hdist(predict(start, launchVel(yaw, deg, mid), null, 4, curveA), from) < d) lo = mid; else hi = mid;
   }
   return (lo + hi) / 2;
 }
@@ -175,18 +181,32 @@ function solvePower(from, yaw, deg, d) {
 // re-solve the shot after the target moves; clamps the target to what the frog can reach
 const arcPts = [];
 function updateAim() {
-  const deg = LOFTS[cur.loft].deg;
-  const start = seatPos(cur.pos, aimYaw);
-  aimMax = hdist(predict(start, launchVel(aimYaw, deg, 1)), cur.pos);
-  aimDist = Math.min(Math.max(aimDist, 3), aimMax);
-  aimPower = aimDist >= aimMax - 0.01 ? 1 : solvePower(cur.pos, aimYaw, deg, aimDist);
+  const deg = cur.deg;
+  // a curved shot launches off to one side and bends back, so it still lands on the target
+  aimLaunch = aimYaw;
+  // curving never buys extra distance: reach is capped at the straight shot's
+  const straightMax = hdist(predict(seatPos(cur.pos, aimYaw), launchVel(aimYaw, deg, 1)), cur.pos);
+  for (let k = 0; k < (cur.curve ? 4 : 1); k++) {
+    const cv = curveVec(aimLaunch, cur.curve);
+    const start = seatPos(cur.pos, aimLaunch);
+    aimMax = Math.min(straightMax, hdist(predict(start, launchVel(aimLaunch, deg, 1), null, 4, cv), cur.pos));
+    aimDist = Math.min(Math.max(aimDist, 3), aimMax);
+    aimPower = aimDist >= aimMax - 0.01 ? 1 : solvePower(cur.pos, aimLaunch, deg, aimDist, cv);
+    if (!cur.curve) break;
+    const land = predict(start, launchVel(aimLaunch, deg, aimPower), null, 4, cv);
+    let err = yawTo(cur.pos, land) - aimYaw;
+    err = Math.atan2(Math.sin(err), Math.cos(err));
+    aimLaunch -= err;
+  }
+  const start = seatPos(cur.pos, aimLaunch);
   pathPts.length = 0;
-  aimLand.copy(predict(start, launchVel(aimYaw, deg, aimPower), pathPts, 1));
+  aimLand.copy(predict(start, launchVel(aimLaunch, deg, aimPower), pathPts, 1, curveVec(aimLaunch, cur.curve)));
   arcPts.length = 0;
   for (let i = 0; i < pathPts.length; i += 4) arcPts.push(pathPts[i]);
   highlightPath();
   // longer shots make the power bar run faster
-  meterSpeed = lerp(0.55, 1.45, Math.min(1.15, aimDist / (maxRange(1) / boost() / boost())));
+  meterSpeed = lerp(0.55, 1.45, Math.min(1.15, aimDist / (maxRange() / boost() / boost())));
+  updatePad();
   placeRig();
 }
 // light up every bubble the planned flight passes through
@@ -254,7 +274,7 @@ function setControls(mode) {
   bottom.dataset.mode = mode;
   if (mode !== 'aim') $('bag').classList.add('hidden');
   renderBag();
-  $('loftBtn').textContent = LOFTS[cur ? cur.loft : 1].name;
+  $('shotPad').classList.toggle('hidden', mode !== 'aim');
   $('swingBtn').textContent = mode === 'meter' ? 'HIT!' : 'SWING';
   $('mapBtn').classList.toggle('on', mapMode);
 }
@@ -340,7 +360,7 @@ renderSetup();
 function startGame() {
   players.forEach(p => { scene.remove(p.frog.group, p.shadow); });
   players = setup.slots.map((s, i) => s === 'off' ? null : {
-    def: PLAYER_DEFS[i], cpu: s === 'cpu', total: 0, holes: [], loft: 1,
+    def: PLAYER_DEFS[i], cpu: s === 'cpu', total: 0, holes: [], deg: 42, curve: 0,
     frog: M.makeFrog(PLAYER_DEFS[i].color), shadow: M.makeShadow(), pos: new THREE.Vector3(), strokes: 0, holed: false, holePts: 0,
     bag: { goggles: 1, spring: 1, sticky: 1, boots: 1 }, equipped: null,
   }).filter(Boolean);
@@ -396,6 +416,7 @@ function nextTurn() {
 function beginAim() {
   mapMode = false;
   cur.equipped = null;
+  cur.curve = 0;
   golfer.setColor(cur.def.color);
   golfer.setSwing(-0.6);
   launcher.setTilt(0.3);
@@ -419,7 +440,7 @@ function beginAim() {
 
 function placeRig() {
   rig.position.copy(cur.pos);
-  rig.rotation.y = aimYaw;
+  rig.rotation.y = aimLaunch;
   const gp = golfer.group.getWorldPosition(tmp);
   golfer.group.position.y = world.height(gp.x, gp.z) - cur.pos.y;
 }
@@ -454,7 +475,7 @@ function planCpu(p) {
   for (const [px, pz] of world.ponds) add(new THREE.Vector3(px, 0, pz), 280, 'pond');
   for (const st of world.streams) { const q = st.pts[0]; add(new THREE.Vector3(q.x, 0, q.z), 340, 'stream'); }
   for (const b of world.belts) add(b.p1.clone().addScaledVector(b.dir, 3).setY(b.top), 320, 'belt', 2);
-  for (const [mx, mz] of world.mountains) add(new THREE.Vector3(mx, world.height(mx, mz), mz), 600, 'mountain', 2);
+  for (const [mx, mz] of world.mountains) add(new THREE.Vector3(mx, world.height(mx, mz), mz), 600, 'mountain', 3);
   for (const f of world.flies) if (f.alive) add(f.center.clone(), 160, 'flies');
   for (const m of world.mysteries) if (!m.used) add(new THREE.Vector3(m.x, m.y, m.z), 300, 'mystery', 2);
   for (const pd of world.pads) add(new THREE.Vector3(pd.x, 0, pd.z), 260, 'pad', 2);
@@ -489,7 +510,7 @@ function planCpu(p) {
   }
   // CPUs are good, not perfect, at stopping the bar
   const stop = Math.random() < 0.35 ? 1 : 0.9 + Math.random() * 0.1;
-  return { yaw, loft, dist: d, stop, kind: pick.kind };
+  return { yaw, loft, deg: LOFTS[loft].deg, dist: d, stop, kind: pick.kind };
 }
 
 // ---------- shooting ----------
@@ -518,12 +539,13 @@ function swing() {
   updateBoard();
 }
 function fire() {
-  const start = seatPos(cur.pos, aimYaw);
-  const v = launchVel(aimYaw, LOFTS[cur.loft].deg, power);
+  const start = seatPos(cur.pos, aimLaunch);
+  const v = launchVel(aimLaunch, cur.deg, power);
   shot = {
     p: cur, pos: start, vel: v, state: 'fly', t: 0, rest: cur.pos.clone(),
     hopsLeft: 0, bounces: 0, contacted: false, hopping: false, hopIn: false,
-    mult: 1, chain: 0, points: 0, used: new Set(), lastDir: dirOf(aimYaw), timer: 0, item: cur.equipped,
+    mult: 1, chain: 0, points: 0, used: new Set(), lastDir: dirOf(aimLaunch), timer: 0, item: cur.equipped,
+    curveA: curveVec(aimLaunch, cur.curve), curveDone: false,
   };
   cur.equipped = null;
   clearHighlights();
@@ -614,6 +636,7 @@ function inWeb(w, x, z, margin = 0) {
 // it was heading, and every point after this doubles.
 function webBounce(w, strong = false) {
   const s = shot, p = s.pos, v = s.vel;
+  s.curveDone = true;
   s.used.add(w);
   p.y = w.y + 0.02;
   const hv = tmp.set(v.x, 0, v.z);
@@ -636,6 +659,7 @@ function webBounce(w, strong = false) {
 // launch the frog from `from` so it comes down exactly on `target`
 function launchTo(from, target, deg = 50) {
   const s = shot;
+  s.curveDone = true;
   const D = Math.max(0.5, hdist(from, target)), dy = target.y - from.y;
   let th = (deg * Math.PI) / 180;
   while (D * Math.tan(th) - dy < 1 && th < 1.4) th += 0.05;
@@ -661,6 +685,7 @@ function flyStep(dt) {
   const s = shot, p = s.pos, v = s.vel;
   const prevY = p.y;
   v.y -= G * dt;
+  if (s.curveA && !s.curveDone) { v.x += s.curveA.x * dt; v.z += s.curveA.z * dt; }
   p.addScaledVector(v, dt);
   const cx = p.x, cy = p.y + 0.4, cz = p.z;
   checkPickups(cx, cy, cz);
@@ -674,7 +699,7 @@ function flyStep(dt) {
     const rx = p.x - b.p1.x, rz = p.z - b.p1.z;
     const along = rx * b.dir.x + rz * b.dir.z, side = rx * b.perp.x + rz * b.perp.z;
     if (along >= 0 && along <= b.len && Math.abs(side) < b.w / 2) {
-      s.state = 'belt'; s.belt = b; s.along = along; s.side = side * 0.6; s.tick = 0;
+      s.state = 'belt'; s.belt = b; s.along = along; s.side = side * 0.6; s.tick = 0; s.curveDone = true;
       p.y = b.top;
       sfx.belt();
       if (!s.used.has(b)) { s.used.add(b); award(50, 'CONVEYOR RIDE!', p, 'belt'); }
@@ -737,6 +762,7 @@ function flyStep(dt) {
 
 function land(h) {
   const s = shot, p = s.pos, v = s.vel;
+  s.curveDone = true;
   checkMystery();
   if (checkPortal()) return;
   for (const w of world.webs) if (!s.used.has(w) && inWeb(w, p.x, p.z, 0.5)) return webBounce(w);
@@ -870,7 +896,7 @@ function checkPortal() {
   for (const pt of world.portals) {
     if (s.used.has(pt) || Math.hypot(p.x - pt.x, p.z - pt.z) > 2.6 || p.y - pt.y > 1.4) continue;
     s.used.add(pt); s.used.add(pt.to);
-    s.state = 'portal'; s.portal = pt; s.et = 0; s.warped = false;
+    s.state = 'portal'; s.portal = pt; s.et = 0; s.warped = false; s.curveDone = true;
     sfx.splash();
     award(50, 'WHIRLPOOL WARP!', p, 'web');
     return true;
@@ -1322,12 +1348,33 @@ function onSwing() {
   else if (phase === 'meter') swing();
 }
 $('swingBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); onSwing(); });
-$('loftBtn').addEventListener('click', () => {
-  if (phase !== 'aim' || cur.cpu) return;
-  cur.loft = (cur.loft + 1) % LOFTS.length;
+// shot-shape pad: up/down tilts the launch angle, left/right bends the flight
+function shapeShot(act) {
+  if (!canAim()) return;
+  if (act === 'up') cur.deg = Math.min(DEG_MAX, cur.deg + DEG_STEP);
+  if (act === 'down') cur.deg = Math.max(DEG_MIN, cur.deg - DEG_STEP);
+  if (act === 'left') cur.curve = Math.max(-1, cur.curve - CURVE_STEP);
+  if (act === 'right') cur.curve = Math.min(1, cur.curve + CURVE_STEP);
+  if (act === 'reset') { cur.deg = 42; cur.curve = 0; }
+  sfx.tick();
   updateAim();
-  setControls('aim');
+}
+function updatePad() {
+  if (!cur) return;
+  $('padAngle').textContent = `${cur.deg}°`;
+  const c = cur.curve;
+  $('padCurve').textContent = c === 0 ? 'straight' : `${c < 0 ? '↶' : '↷'} ${Math.round(Math.abs(c) * 100)}%`;
+}
+let padRepeat = null;
+$('shotPad').addEventListener('pointerdown', (e) => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  e.preventDefault();
+  shapeShot(b.dataset.act);
+  clearInterval(padRepeat);
+  if (b.dataset.act !== 'reset') padRepeat = setInterval(() => shapeShot(b.dataset.act), 140);
 });
+for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) $('shotPad').addEventListener(ev, () => clearInterval(padRepeat));
 $('mapBtn').addEventListener('click', () => {
   if (phase !== 'aim') return;
   mapMode = !mapMode;
@@ -1354,6 +1401,10 @@ window.addEventListener('keydown', (e) => {
   if (canAim() && e.code === 'ArrowRight') { aimYaw -= 0.03; updateAim(); }
   if (canAim() && e.code === 'ArrowUp') { aimDist += 2; updateAim(); }
   if (canAim() && e.code === 'ArrowDown') { aimDist -= 2; updateAim(); }
+  if (e.code === 'KeyW') shapeShot('up');
+  if (e.code === 'KeyS') shapeShot('down');
+  if (e.code === 'KeyA') shapeShot('left');
+  if (e.code === 'KeyD') shapeShot('right');
 });
 
 // ---------- per-frame ----------
@@ -1375,7 +1426,7 @@ function showAim() {
   // reach ring
   rangeRing.visible = phase === 'aim' || phase === 'cpu';
   if (rangeRing.visible) {
-    const R = maxRange(cur.loft);
+    const R = maxRange(cur.deg);
     for (let i = 0; i < RING_N; i++) {
       const a = (i / RING_N) * Math.PI * 2;
       const x = cur.pos.x + Math.sin(a) * R, z = cur.pos.z + Math.cos(a) * R;
@@ -1390,7 +1441,7 @@ function aimCamera(k = 1) {
   const d = dirOf(aimYaw);
   if (mapMode) {
     // frame the frog and the cup (fixed for the turn, so the view holds still while you drag)
-    const R = maxRange(cur.loft) * 0.6;
+    const R = maxRange(cur.deg) * 0.6;
     const x0 = Math.min(cur.pos.x, world.cup.x) - 22, x1 = Math.max(cur.pos.x, world.cup.x) + 22;
     const z0 = Math.min(cur.pos.z, world.cup.z) - 22, z1 = Math.max(cur.pos.z, world.cup.z) + 22;
     const W = Math.max(x1 - x0, R), D = Math.max(z1 - z0, R);
@@ -1447,7 +1498,7 @@ function tick(dt) {
     d = Math.atan2(Math.sin(d), Math.cos(d));
     aimYaw += d * Math.min(1, dt * 3);
     aimDist += (cpuPlan.dist - aimDist) * Math.min(1, dt * 3);
-    if (phaseT > 0.5) cur.loft = cpuPlan.loft;
+    if (phaseT > 0.5) cur.deg = cpuPlan.deg;
     updateAim();
     aimCamera();
     showAim();
@@ -1494,9 +1545,9 @@ function tick(dt) {
         p.frog.setStretch(s.state === 'swim' ? 0.6 + Math.sin(time * 12) * 0.4 : 0);
       }
     } else if (p === cur && (phase === 'aim' || phase === 'cpu' || phase === 'meter' || phase === 'swing')) {
-      g.position.copy(seatPos(p.pos, aimYaw));
+      g.position.copy(seatPos(p.pos, aimLaunch));
       g.position.y = p.pos.y + 0.2 + Math.max(0, Math.sin(time * 3)) * 0.04;
-      g.rotation.set(0, aimYaw, 0);
+      g.rotation.set(0, aimLaunch, 0);
       p.frog.setStretch(0);
     } else {
       g.position.copy(p.pos);
@@ -1582,7 +1633,9 @@ showBackdrop();
 window.__frolf = {
   step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) tick(dt); renderer.render(scene, camera); },
   get state() { return { phase, hole: holeIdx, cur: cur && cur.def.name, shot: shot && shot.state, players: players.map(p => ({ n: p.def.name, total: p.total, strokes: p.strokes, holed: p.holed })) }; },
-  setAim(yaw, dist, loft) { aimYaw = yaw; if (dist != null) aimDist = dist; if (loft != null) cur.loft = loft; updateAim(); },
+  setAim(yaw, dist, loft) { aimYaw = yaw; if (dist != null) aimDist = dist; if (loft != null) cur.deg = loft > 5 ? loft : LOFTS[loft].deg; updateAim(); },
+  shape(deg, curve) { if (deg != null) cur.deg = deg; if (curve != null) cur.curve = curve; updateAim(); },
+  get path() { return pathPts.map(q => q.clone()); },
   aimAt(x, z) { setAimPoint(new THREE.Vector3(x, 0, z)); },
   get aim() { return { yaw: aimYaw, dist: aimDist, max: aimMax, power: aimPower, speed: meterSpeed, land: aimLand.clone() }; },
   get world() { return world; },

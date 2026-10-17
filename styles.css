@@ -89,7 +89,7 @@ button { font-family: var(--font); cursor: pointer; border: 0; touch-action: man
 #meterWrap.hot #meterBar { box-shadow: inset 0 0 0 3px #fff, 0 0 14px #fff; }
 #meterBar .tick { position: absolute; top: 4px; bottom: 4px; width: 2px; background: rgba(255,255,255,0.35); }
 #meterRange { font-weight: 800; font-size: 15px; min-width: 104px; text-align: right; color: var(--gold); }
-#buttons { display: grid; grid-template-columns: 0.8fr 1fr 1fr 2fr; gap: 8px; pointer-events: auto; }
+#buttons { display: grid; grid-template-columns: 0.8fr 1fr 2fr; gap: 8px; pointer-events: auto; }
 #buttons button {
   height: 60px; border-radius: 18px; font-size: 19px; font-weight: 800; color: #fff;
   background: #2f6fd1; box-shadow: 0 5px 0 #1b437f; transition: transform 0.05s;
@@ -195,3 +195,22 @@ h2 { margin: 0; font-size: 34px; color: #2f8cf0; }
 #worlds .world.on { border-color: #2f8cf0; background: #fff; box-shadow: 0 4px 0 #2f8cf0; }
 body[data-world="ice"] h1 span { color: #7fd4ff; }
 body[data-world="ice"] #title, body[data-world="ice"] #summary { background: linear-gradient(180deg, rgba(120,170,220,0.25), rgba(40,70,110,0.55)); }
+
+/* ---------- shot-shape arrow pad ---------- */
+#shotPad {
+  position: absolute; right: 10px; bottom: calc(max(12px, env(safe-area-inset-bottom)) + 150px);
+  display: grid; grid-template-columns: repeat(3, 50px); grid-template-rows: repeat(3, 50px); gap: 4px;
+  grid-template-areas: ". up ." "left mid right" ". down ."; pointer-events: auto;
+}
+#shotPad button {
+  border-radius: 14px; background: rgba(12, 40, 70, 0.72); color: #fff; font-size: 20px; font-weight: 800;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35); touch-action: none;
+}
+#shotPad button:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0,0,0,0.35); }
+#shotPad [data-act="up"] { grid-area: up; }
+#shotPad [data-act="down"] { grid-area: down; }
+#shotPad [data-act="left"] { grid-area: left; }
+#shotPad [data-act="right"] { grid-area: right; }
+#shotPad .mid { grid-area: mid; background: rgba(255,255,255,0.92); color: var(--ink); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; padding: 0; }
+#shotPad .mid b { font-size: 17px; }
+#shotPad .mid small { font-size: 10px; font-weight: 700; margin-top: 2px; }

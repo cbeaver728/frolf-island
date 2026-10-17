@@ -31,6 +31,13 @@
     <div id="popups"></div>
     <div id="countdown"></div>
     <button id="pressBtn" class="hidden">PRESS<br>on GO!</button>
+    <div id="shotPad" class="hidden" aria-label="Shot shape">
+      <button data-act="up" aria-label="Higher arc">▲</button>
+      <button data-act="left" aria-label="Curve left">◀</button>
+      <button data-act="reset" class="mid" aria-label="Reset shot shape"><b id="padAngle">42°</b><small id="padCurve">straight</small></button>
+      <button data-act="right" aria-label="Curve right">▶</button>
+      <button data-act="down" aria-label="Lower arc">▼</button>
+    </div>
     <div id="bottom" data-mode="hidden">
       <div id="meterWrap">
         <div id="meterBar"><div id="meterFill"></div><div class="tick" style="left:25%"></div><div class="tick" style="left:50%"></div><div class="tick" style="left:75%"></div><div class="sweet"></div></div>
@@ -39,7 +46,6 @@
       <div id="bag" class="hidden"></div>
       <div id="buttons">
         <button id="bagBtn" aria-label="Backpack">🎒</button>
-        <button id="loftBtn" aria-label="Launch angle">MID</button>
         <button id="mapBtn" aria-label="Map view">MAP</button>
         <button id="swingBtn">SWING</button>
       </div>
@@ -65,7 +71,7 @@
         <summary>How to play</summary>
         <ul>
           <li><b>Aim:</b> tap the ground to put the target there, or drag (sideways turns, up/down moves it farther/closer). In <b>MAP</b> view, drag the target anywhere inside the yellow circle.</li>
-          <li><b>Angle:</b> LOW rolls farther, HIGH stops faster.</li>
+          <li><b>Shot shape:</b> the arrow pad on the right. ▲▼ raise or lower the arc: high arcs are shorter but drop onto mountain tops; low arcs skim under things and roll farther. ◀▶ curve the flight around obstacles; it still lands on your target. Tap the middle to reset.</li>
           <li><b>Power:</b> tap SWING to start the bar, then HIT! right as it reaches the end to land on the target. Longer shots make the bar faster!</li>
           <li><b>Flies:</b> after your frog lands it leaps at any fly nearby, then the next one, and the next. Each one adds to your combo!</li>
           <li><b>Spider webs</b> lie on the ground. Land on or near one and you bounce high, and every point after <b>doubles</b>. Giant webs fling you twice as far.</li>
