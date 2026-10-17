@@ -59,6 +59,7 @@ export class World {
     this.hills = hole.hills || [];
     this.mountains = hole.mountains || [];
     this.icePatches = hole.ice || [];
+    this.iceH = this.icePatches.map(([x, z]) => this.rawHeight(x, z));
     this.streams = (hole.streams || []).map(st => {
       const pts = st.pts.map(([x, z]) => ({ x, z }));
       return { w: st.w, pts, total: polyInfo(pts, pts[0].x, pts[0].z).total };
@@ -134,6 +135,10 @@ export class World {
     if (dc < 16) h = lerp(h, this.greenH, smooth(16, 9, dc));
     const dt = Math.hypot(x - t.x, z - t.z);
     if (dt < 7) h = lerp(h, this.teeH, smooth(7, 3, dt));
+    this.icePatches.forEach(([ix, iz, rx, rz], i) => {
+      const k = Math.hypot((x - ix) / rx, (z - iz) / rz);
+      if (k < 1.3) h = lerp(h, this.iceH[i], smooth(1.3, 0.95, k));
+    });
     for (const [px, pz, rx, rz, frozen] of this.ponds) {
       const k = Math.hypot((x - px) / rx, (z - pz) / rz);
       if (k < 1.35) h = lerp(h, frozen ? 0.1 : -1.4, smooth(1.35, 0.85, k));

@@ -476,6 +476,17 @@ function planCpu(p) {
     const v = launchVel(yaw, LOFTS[loft].deg, solvePower(p.pos, yaw, LOFTS[loft].deg, dist));
     d = Math.max(3, dist - Math.hypot(v.x, v.z) * 0.2);
   }
+  // landing on ice? the frog will skid on, so land short by about the skid (ice friction 3.5 m/s²)
+  if (p.equipped !== 'sticky') {
+    for (let k = 0; k < 4; k++) {
+      const lx = p.pos.x + Math.sin(yaw) * d, lz = p.pos.z + Math.cos(yaw) * d;
+      if (world.surface(lx, lz) !== 'ice') break;
+      if (has('sticky')) { p.equipped = 'sticky'; break; }
+      const v = launchVel(yaw, LOFTS[loft].deg, solvePower(p.pos, yaw, LOFTS[loft].deg, d));
+      const skid = (Math.hypot(v.x, v.z) * 0.8) ** 2 / 7;
+      d = Math.max(3, d - Math.min(skid, d * 0.5));
+    }
+  }
   // CPUs are good, not perfect, at stopping the bar
   const stop = Math.random() < 0.35 ? 1 : 0.9 + Math.random() * 0.1;
   return { yaw, loft, dist: d, stop, kind: pick.kind };
@@ -745,9 +756,10 @@ function land(h) {
   // ice: no bounce, no hops, the frog skids along keeping a good part of its speed
   if (surf === 'ice') {
     p.y = h;
-    const keep = s.hopping ? 0.9 : 0.6;
+    const keep = s.hopping ? 0.95 : 0.8;
     startSlide(true);
     s.slideV.set(v.x * keep, 0, v.z * keep);
+    if (s.slideV.lengthSq() > 0.01) s.lastDir.copy(s.slideV).normalize();
     return;
   }
   if (surf === 'sand') { sfx.thud(); popup('Sand!', p, 'note'); return restHere(); }
@@ -977,10 +989,20 @@ function slideStep(dt) {
   s.slideT += dt;
   const n = world.normal(p.x, p.z);
   const icy = world.surface(p.x, p.z) === 'ice';
-  v.x += n.x * G * dt; v.z += n.z * G * dt;      // the normal's sideways part points downhill
-  // ice barely slows you; a steep slope a bit; flat snow or grass stops you fast
-  v.multiplyScalar(Math.pow(icy ? 0.4 : n.y < 0.86 ? 0.5 : 0.03, dt));
-  if (v.length() > 24) v.setLength(24);
+  if (icy) {
+    // ice: hardly any grip, so the frog glides on the way it landed and slows gradually
+    v.x += n.x * G * dt * 0.3; v.z += n.z * G * dt * 0.3;
+    const sp = v.length(), slowed = Math.max(0, sp - 3.5 * dt);
+    v.multiplyScalar(sp > 0 ? slowed / sp : 0);
+  } else if (n.y < 0.86) {
+    // steep slope: gravity pulls you down it
+    v.x += n.x * G * dt; v.z += n.z * G * dt;      // the normal's sideways part points downhill
+    v.multiplyScalar(Math.pow(0.5, dt));
+  } else {
+    // ordinary snow or grass: grips and stops you fast, without rolling you back
+    v.multiplyScalar(Math.pow(0.03, dt));
+  }
+  if (v.length() > 28) v.setLength(28);
   p.x += v.x * dt; p.z += v.z * dt;
   const h = world.height(p.x, p.z);
   if (h < 0.02) {
@@ -995,7 +1017,7 @@ function slideStep(dt) {
   checkMystery();
   if (checkPortal()) return;
   for (const w of world.webs) if (!s.used.has(w) && inWeb(w, p.x, p.z)) { s.vel.set(v.x, -1, v.z); return webBounce(w); }
-  const stopped = icy ? v.length() < 0.5 : Math.hypot(n.x, n.z) < 0.2 && v.length() < 2;
+  const stopped = icy ? v.length() < 0.5 : n.y >= 0.86 && v.length() < 1.5;
   if (stopped || s.slideT > 12) restHere();
 }
 
