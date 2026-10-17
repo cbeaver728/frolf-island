@@ -170,7 +170,7 @@ function updateBoard() {
   $('board').innerHTML = players.map(p => `
     <div class="row${p === cur ? ' cur' : ''}${p.holed ? ' done' : ''}">
       <i style="background:${p.def.css}"></i><span>${p.def.name}${p.cpu ? ' <small>CPU</small>' : ''}</span>
-      <b>${p.total.toLocaleString()}</b><em>${p.holed ? '✓' : p.strokes}</em>
+      <b>${p.total.toLocaleString()}</b><em>${p.holed ? '✓' : `${p.strokes}/${MAX_STROKES}`}</em>
     </div>`).join('');
 }
 function updatePin() {
@@ -549,14 +549,20 @@ function flyStep(dt) {
       return;
     }
   }
-  // flying straight into an elephant: it catches you and throws you right into the hole
+  // flying into an elephant is like hitting a tree: bonk off its side and flop to the ground
   for (const el of world.elephants) {
-    if (s.used.has(el)) continue;
-    const bx = el.pos.x, by = el.pos.y + 3.6, bz = el.pos.z;
-    const hx = el.pos.x + Math.sin(el.yaw) * 2.9, hz = el.pos.z + Math.cos(el.yaw) * 2.9, hy = el.pos.y + 4.6;
-    if (Math.hypot(cx - bx, cy - by, cz - bz) < 3.4 || Math.hypot(cx - hx, cy - hy, cz - hz) < 2.3) {
-      startElephant(el, 'express');
-      return;
+    const parts = [[el.pos.x, el.pos.y + 3.6, el.pos.z, 3.4],
+      [el.pos.x + Math.sin(el.yaw) * 2.9, el.pos.y + 4.6, el.pos.z + Math.cos(el.yaw) * 2.9, 2.3]];
+    for (const [bx, by, bz, r] of parts) {
+      if (Math.hypot(cx - bx, cy - by, cz - bz) >= r) continue;
+      // push straight out sideways so the frog can't perch on its back
+      let dx = cx - bx, dz = cz - bz, d = Math.hypot(dx, dz);
+      if (d < 0.01) { dx = -v.x; dz = -v.z; d = Math.hypot(dx, dz) || 1; }
+      dx /= d; dz /= d;
+      p.x = bx + dx * (r + 0.4); p.z = bz + dz * (r + 0.4);
+      v.set(dx * 2.5, Math.min(v.y, 0), dz * 2.5);
+      s.hopping = true; s.hopsLeft = 0;
+      if (!s.used.has('bonk')) { s.used.add('bonk'); sfx.thud(); sfx.trumpet(); popup('Bonk!', p, 'note'); }
     }
   }
   for (const t of world.trees) {
@@ -676,7 +682,7 @@ function restHere() {
     }
   }
   for (const sn of world.snakes) if (!s.used.has(sn) && Math.hypot(p.x - sn.x, p.z - sn.z) < SNAKE_R) return startSnake(sn);
-  for (const el of world.elephants) if (!s.used.has(el) && hdist(p, el.pos) < ELEPHANT_R) return startElephant(el, 'rear');
+  for (const el of world.elephants) if (!s.used.has(el) && hdist(p, el.pos) < ELEPHANT_R) return startElephant(el);
   if (leapForFly()) return;
   finish();
 }
@@ -739,7 +745,7 @@ function startSlide() {
   s.slides = (s.slides || 0) + 1;
   s.state = 'slide'; s.slideT = 0; s.tick = 0;
   s.slideV = new THREE.Vector3();
-  if (!s.used.has('slide')) { s.used.add('slide'); award(80, 'WHEEE!', s.pos, 'belt'); }
+  if (!s.used.has('slide')) { s.used.add('slide'); popup('Wheee!', s.pos, 'note'); }
 }
 function slideStep(dt) {
   const s = shot, p = s.pos, v = s.slideV;
@@ -759,7 +765,6 @@ function slideStep(dt) {
   if (v.lengthSq() > 0.25) s.lastDir.set(v.x, 0, v.z).normalize();
   s.vel.set(v.x, 0, v.z);
   checkPickups(p.x, p.y + 0.4, p.z);
-  perSecond(dt, 25);
   if ((Math.hypot(n.x, n.z) < 0.2 && v.length() < 2) || s.slideT > 8) restHere();
 }
 
@@ -795,21 +800,16 @@ function snakeStep(dt) {
 }
 
 // ---------- elephants ----------
-// 'express': you flew into it, so it throws you straight into the hole.
-// 'rear': you landed nearby. It grabs you, rears up, counts 3-2-1-GO and you press on GO.
+// Stop near one and it grabs you, rears up, counts 3-2-1-GO and you press on GO.
 const GO_T = 2.9;
-function startElephant(el, mode) {
+function startElephant(el) {
   const s = shot;
   s.used.add(el);
-  s.state = 'elephant'; s.el = el; s.et = 0; s.mode = mode; s.pressT = null; s.lastCount = '';
+  s.state = 'elephant'; s.el = el; s.et = 0; s.pressT = null; s.lastCount = '';
   el.grabT = 0; el.faceYaw = null;
   sfx.trumpet();
-  if (mode === 'express') {
-    award(300, 'ELEPHANT EXPRESS!', s.pos, 'gold');
-  } else {
-    award(150, 'ELEPHANT!', s.pos, 'gold');
-    s.cpuPress = GO_T + (Math.random() + Math.random() + Math.random() - 1.5) * 0.3;
-  }
+  award(150, 'ELEPHANT!', s.pos, 'gold');
+  s.cpuPress = GO_T + (Math.random() + Math.random() + Math.random() - 1.5) * 0.3;
 }
 function elephantStep(dt) {
   const s = shot, el = s.el;
@@ -817,15 +817,6 @@ function elephantStep(dt) {
   el.model.tip.getWorldPosition(tmp);
   tmp.y -= 0.4;
   s.pos.lerp(tmp, Math.min(1, dt * 10));
-  if (s.mode === 'express') {
-    if (s.et > 1.1) {
-      el.grabT = -1;
-      launchTo(s.pos.clone(), world.cup.clone(), 55);
-      popup('Straight to the hole!', s.pos, 'note');
-      sfx.boing();
-    }
-    return;
-  }
   el.rearTarget = s.et > 0.5 ? 1 : 0;
   // countdown
   let label = '';
@@ -1085,7 +1076,7 @@ $('menuBtn').addEventListener('click', () => {
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
-    if (shot && shot.state === 'elephant' && shot.mode === 'rear' && shot.pressT === null && !cur.cpu) { shot.pressT = shot.et; sfx.thwack(); setPressButton(false); }
+    if (shot && shot.state === 'elephant' && shot.pressT === null && !cur.cpu) { shot.pressT = shot.et; sfx.thwack(); setPressButton(false); }
     else onSwing();
   }
   if (canAim() && e.code === 'ArrowLeft') { aimYaw += 0.03; updateAim(); }

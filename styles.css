@@ -28,17 +28,17 @@ button { font-family: var(--font); cursor: pointer; border: 0; touch-action: man
 }
 #holeTag b { display: block; font-size: 20px; line-height: 1; color: var(--lime); text-shadow: 0 2px 0 #1d5a12; }
 #holeTag span { font-size: 13px; opacity: 0.9; white-space: nowrap; display: block; max-width: 28vw; overflow: hidden; text-overflow: ellipsis; }
-#holeTag #pin { margin-left: 4px; white-space: nowrap; font-weight: 800; font-size: 15px; color: var(--gold); }
+#holeTag #pin { margin-left: 0; white-space: nowrap; font-weight: 800; font-size: 15px; color: var(--gold); }
 #menuBtn { width: 38px; height: 38px; border-radius: 12px; background: rgba(255,255,255,0.18); color: #fff; font-size: 20px; }
 #board { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex-shrink: 0; max-width: 46vw; }
 #board .row {
-  display: grid; grid-template-columns: 12px 1fr auto 20px; align-items: center; gap: 6px;
+  display: grid; grid-template-columns: 12px 1fr auto 28px; align-items: center; gap: 6px;
   background: var(--panel); border-radius: 10px; padding: 2px 7px; font-size: 12.5px; line-height: 1.5; border: 2px solid transparent;
 }
 #board .row.cur { border-color: #fff; background: rgba(12, 40, 70, 0.8); }
 #board .row.done { opacity: 0.75; }
 #board i, #sumTable i, .slot i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 2px rgba(255,255,255,0.7); }
-#board small { font-size: 10px; opacity: 0.7; }
+#board small { font-size: 9px; opacity: 0.7; }
 #board b { font-weight: 800; color: var(--gold); }
 #board em { font-style: normal; text-align: right; opacity: 0.8; }
 
@@ -160,3 +160,7 @@ h2 { margin: 0; font-size: 34px; color: #2f8cf0; }
 }
 #pressBtn:active { transform: translateX(-50%) translateY(4px); box-shadow: 0 4px 0 #a3264a; }
 .pop.bad { color: #ff8a8a; font-size: 30px; }
+
+#holeTag { min-width: 0; flex: 0 1 auto; }
+#holeTag .tagText { min-width: 0; }
+#holeTag #pin { font-size: 13px; line-height: 1.2; }

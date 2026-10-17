@@ -20,12 +20,12 @@ Play: https://cbeaver728.github.io/frolf-island/
   **doubles** every point for the rest of the shot. Some sit at the end of conveyor belts.
 - **Snakes** pop in and out of holes. Stop near one and it grabs you, shakes, and throws you,
   straight into a web if there's one within 40 m.
-- **Elephants**: fly into one and it throws you right into the hole. Stop near one and it rears
+- **Elephants**: fly into one and you bonk off it like a tree. Stop near one and it rears
   up with a 3-2-1-GO countdown: press on GO for up to +600, or lose 200 for bad timing. Then
   it throws you, half the time at the hole and half the time anywhere.
 - **Water** is good: swim for +50 every second, grab the bubbles floating on lakes, and ride
-  streams with the current. Belts pay +30 a second; sliding down a mountain +25 a second.
-- **Mountains** have steep sides you slide down and treasure bubbles (3 × 300) on top.
+  streams with the current. Belts pay +30 a second.
+- **Mountains** have steep sides you slide down (no points) and treasure bubbles (3 × 300) on top.
 - When the frog stops, anything nearby gets a go at it: hop into the cup, slide, web, snake,
   elephant, then leap at flies. Everything chains into one combo (up to ×3).
 - **Holes are arenas**, so the points are out to the sides. Hole-out bonus by strokes:

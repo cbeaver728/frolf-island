@@ -340,7 +340,7 @@ export class World {
 
   buildTrees() {
     const geo = M.makePalmGeometry();
-    const max = 120;
+    const max = 140;
     const trunks = new THREE.InstancedMesh(geo.trunk, M.lam(0x9a6b3f), max);
     const crowns = new THREE.InstancedMesh(geo.crown, new THREE.MeshLambertMaterial({ vertexColors: true }), max);
     this.trees = [];
@@ -388,7 +388,7 @@ export class World {
     const pick = () => BUBBLE_VALUES[Math.floor(this.rand() * BUBBLE_VALUES.length)];
     // scattered over the open ground
     const area = (this.maxX - this.minX) * (this.maxZ - this.minZ);
-    const n = Math.round(area / 420);
+    const n = Math.round(area / 480);
     let tries = 0, made = 0;
     while (made < n && tries++ < n * 20) {
       const x = lerp(this.minX, this.maxX, this.rand()), z = lerp(this.minZ, this.maxZ, this.rand());
@@ -453,7 +453,7 @@ export class World {
     // little swarms around the arena so a landing frog can chain them
     this.flies = [];
     const avoid = this.gimmickSpots();
-    const swarms = Math.max(3, Math.round((this.maxX - this.minX) * (this.maxZ - this.minZ) / 9000));
+    const swarms = Math.max(4, Math.round((this.maxX - this.minX) * (this.maxZ - this.minZ) / 5500));
     let tries = 0, made = 0;
     while (made < swarms && tries++ < 400) {
       const sx = lerp(this.minX, this.maxX, this.rand()), sz = lerp(this.minZ, this.maxZ, this.rand());
