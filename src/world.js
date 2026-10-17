@@ -31,15 +31,23 @@ function polyInfo(pts, x, z) {
   return { d: Math.sqrt(best), s, seg, total: acc };
 }
 
-const COLORS = {
-  fairway: [0x74d63f, 0x6acb38], green: 0x93e85a, rough: 0x3f9e2e, sand: 0xf0dfa4,
-  beach: 0xf3e3ae, shallow: 0xd8cf98, deep: 0x1f7a8a, rock: 0xa08d68, snow: 0xf4f1e4,
+const PALETTES = {
+  tropical: {
+    fairway: [0x74d63f, 0x6acb38], green: 0x93e85a, rough: 0x3f9e2e, sand: 0xf0dfa4,
+    beach: 0xf3e3ae, shallow: 0xd8cf98, deep: 0x1f7a8a, rock: 0xa08d68, snow: 0xf4f1e4, ice: 0xbfe8ff,
+  },
+  ice: {
+    fairway: [0xf4f8fc, 0xe8eff7], green: 0xbfe9d2, rough: 0xd7e1ea, sand: 0xbdb6aa,
+    beach: 0xcfc8bb, shallow: 0x8fbcd4, deep: 0x163f60, rock: 0x7f8590, snow: 0xffffff, ice: 0xa9dcf5,
+  },
 };
 export const SNAKE_R = 7.5, ELEPHANT_R = 10;
 
 export class World {
-  constructor(hole, index) {
+  constructor(hole, index, theme = 'tropical') {
     this.hole = hole;
+    this.theme = theme;
+    this.colors = PALETTES[theme] || PALETTES.tropical;
     this.rand = mulberry32(1234 + index * 977);
     this.group = new THREE.Group();
     this.path = hole.path.map(([x, z]) => ({ x, z }));
@@ -50,6 +58,7 @@ export class World {
     this.moats = hole.moats || [];
     this.hills = hole.hills || [];
     this.mountains = hole.mountains || [];
+    this.icePatches = hole.ice || [];
     this.streams = (hole.streams || []).map(st => {
       const pts = st.pts.map(([x, z]) => ({ x, z }));
       return { w: st.w, pts, total: polyInfo(pts, pts[0].x, pts[0].z).total };
@@ -77,6 +86,7 @@ export class World {
     this.buildTrees();
     this.buildBubbles();
     this.buildFlies();
+    if (theme === 'ice') this.buildIcebergs();
     this.bursts = [];
   }
 
@@ -124,9 +134,9 @@ export class World {
     if (dc < 16) h = lerp(h, this.greenH, smooth(16, 9, dc));
     const dt = Math.hypot(x - t.x, z - t.z);
     if (dt < 7) h = lerp(h, this.teeH, smooth(7, 3, dt));
-    for (const [px, pz, rx, rz] of this.ponds) {
+    for (const [px, pz, rx, rz, frozen] of this.ponds) {
       const k = Math.hypot((x - px) / rx, (z - pz) / rz);
-      if (k < 1.35) h = lerp(h, -1.4, smooth(1.35, 0.85, k));
+      if (k < 1.35) h = lerp(h, frozen ? 0.1 : -1.4, smooth(1.35, 0.85, k));
     }
     for (const [mx, mz, r1, r2] of this.moats) {
       const half = (r2 - r1) / 2;
@@ -153,7 +163,7 @@ export class World {
     return null;
   }
   inLake(x, z) {
-    for (const [px, pz, rx, rz] of this.ponds) if (Math.hypot((x - px) / rx, (z - pz) / rz) < 1.45) return true;
+    for (const [px, pz, rx, rz, frozen] of this.ponds) if (!frozen && Math.hypot((x - px) / rx, (z - pz) / rz) < 1.45) return true;
     for (const [mx, mz, r1, r2] of this.moats) {
       const d = Math.hypot(x - mx, z - mz);
       if (d > r1 - 3 && d < r2 + 3) return true;
@@ -163,10 +173,17 @@ export class World {
   surface(x, z, h = this.height(x, z)) {
     if (h < 0.02) return this.inLake(x, z) ? 'pond' : 'sea';
     const c = this.cup;
+    if (this.onIce(x, z)) return 'ice';
     if (Math.hypot(x - c.x, z - c.z) < 11) return 'green';
     for (const [bx, bz, r] of this.bunkers) if (Math.hypot(x - bx, z - bz) < r * 0.95) return 'sand';
     if (this.landSD(x, z) > -7) return h < 0.55 ? 'sand' : 'rough';
     return 'fairway';
+  }
+  // frozen ponds and ice sheets: frogs slip and slide on these
+  onIce(x, z) {
+    for (const [px, pz, rx, rz, frozen] of this.ponds) if (frozen && Math.hypot((x - px) / rx, (z - pz) / rz) < 1.05) return true;
+    for (const [ix, iz, rx, rz] of this.icePatches) if (Math.hypot((x - ix) / rx, (z - iz) / rz) < 1) return true;
+    return false;
   }
   // every gimmick spot, used to keep trees and swarms out of the way
   gimmickSpots() {
@@ -197,23 +214,26 @@ export class World {
       const h = this.height(x, z);
       pos.setY(i, h);
       const s = this.surface(x, z, h);
-      if (h < 0.02) {
-        c.set(COLORS.shallow).lerp(c2.set(COLORS.deep), smooth(0, -2.5, h));
+      if (s === 'ice') {
+        c.set(this.colors.ice);
+        c.offsetHSL(0, 0, Math.sin(x * 0.9 + z * 0.4) * 0.04 + Math.sin(z * 2.1 - x * 0.7) * 0.025);
+      } else if (h < 0.02) {
+        c.set(this.colors.shallow).lerp(c2.set(this.colors.deep), smooth(0, -2.5, h));
       } else if (s === 'fairway') {
-        c.set(COLORS.fairway[Math.floor((z + x * 0.3) / 7) & 1]);
-        c.lerp(c2.set(COLORS.rough), smooth(-12, -7, this.landSD(x, z)) * 0.5);
+        c.set(this.colors.fairway[Math.floor((z + x * 0.3) / 7) & 1]);
+        c.lerp(c2.set(this.colors.rough), smooth(-12, -7, this.landSD(x, z)) * 0.5);
       } else if (s === 'green') {
-        c.set(COLORS.green);
+        c.set(this.colors.green);
       } else if (s === 'sand') {
-        c.set(h < 0.55 ? COLORS.beach : COLORS.sand);
+        c.set(h < 0.55 ? this.colors.beach : this.colors.sand);
       } else {
-        c.set(COLORS.rough);
+        c.set(this.colors.rough);
         c.offsetHSL(0, 0, (Math.sin(x * 0.7) * Math.cos(z * 0.6)) * 0.03);
       }
       if (h > 2.5 && s !== 'green') {
         const ny = this.normal(x, z).y;
-        c.lerp(c2.set(COLORS.rock), smooth(0.93, 0.75, ny) * 0.85);
-        if (h > 11) c.lerp(c2.set(COLORS.snow), smooth(11, 13, h));
+        c.lerp(c2.set(this.colors.rock), smooth(0.93, 0.75, ny) * 0.85);
+        if (h > 11) c.lerp(c2.set(this.colors.snow), smooth(11, 13, h));
       }
       const n = (this.rand() - 0.5) * 0.04;
       col[i * 3] = c.r * (1 + n); col[i * 3 + 1] = c.g * (1 + n); col[i * 3 + 2] = c.b * (1 + n);
@@ -288,7 +308,8 @@ export class World {
   // lily pads float on every lake
   buildPads() {
     this.pads = [];
-    for (const [px, pz, rx, rz] of this.ponds) {
+    for (const [px, pz, rx, rz, frozen] of this.ponds) {
+      if (frozen) continue;
       const n = Math.max(1, Math.min(4, Math.round((rx * rz) / 45)));
       for (let i = 0; i < n; i++) {
         let x, z, ok = false;
@@ -298,7 +319,7 @@ export class World {
           ok = this.height(x, z) < -0.6 && this.pads.every(p => Math.hypot(p.x - x, p.z - z) > 6);
         }
         if (!ok) continue;
-        const m = M.makeLilyPad();
+        const m = this.theme === 'ice' ? M.makeIceFloe() : M.makeLilyPad();
         m.group.position.set(x, 0.08, z);
         m.group.rotation.y = this.rand() * 6.28;
         this.group.add(m.group);
@@ -336,7 +357,7 @@ export class World {
 
   buildElephants() {
     this.elephants = (this.hole.elephants || []).map(([x1, z1, x2, z2]) => {
-      const m = M.makeElephant();
+      const m = M.makeElephant(this.theme === 'ice');
       const a = new THREE.Vector3(x1, 0, z1), b = new THREE.Vector3(x2, 0, z2);
       const el = { a, b, model: m, pos: a.clone(), t: this.rand(), dirSign: 1, yaw: 0, walk: 0,
         grabT: -1, rear: 0, rearTarget: 0, faceYaw: null, pause: 0 };
@@ -384,7 +405,7 @@ export class World {
 
   buildSnakes() {
     this.snakes = (this.hole.snakes || []).map(([x, z]) => {
-      const m = M.makeSnake();
+      const m = M.makeSnake(this.theme === 'ice');
       const y = this.height(x, z);
       m.group.position.set(x, y, z);
       this.group.add(m.group);
@@ -393,9 +414,9 @@ export class World {
   }
 
   buildTrees() {
-    const geo = M.makePalmGeometry();
+    const geo = this.theme === 'ice' ? M.makePineGeometry() : M.makePalmGeometry();
     const max = 140;
-    const trunks = new THREE.InstancedMesh(geo.trunk, M.lam(0x9a6b3f), max);
+    const trunks = new THREE.InstancedMesh(geo.trunk, M.lam(this.theme === 'ice' ? 0x6b4a32 : 0x9a6b3f), max);
     const crowns = new THREE.InstancedMesh(geo.crown, new THREE.MeshLambertMaterial({ vertexColors: true }), max);
     this.trees = [];
     const mat = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
@@ -413,7 +434,7 @@ export class World {
       // the arena stays open: trees ring the shore, plus any groves
       if (!g && (sd < -14 || sd > -3)) continue;
       if (Math.hypot(x - this.cup.x, z - this.cup.z) < 18 || Math.hypot(x - this.tee.x, z - this.tee.z) < 10) continue;
-      if (this.inLake(x, z) || this.surface(x, z, h) === 'green') continue;
+      if (this.inLake(x, z) || ['green', 'ice'].includes(this.surface(x, z, h))) continue;
       if (avoid.some(([ax, az, r]) => Math.hypot(x - ax, z - az) < r)) continue;
       if (this.trees.some(t => Math.hypot(t.x - x, t.z - z) < 5.5)) continue;
       const s = 0.8 + this.rand() * 0.45, yaw = this.rand() * Math.PI * 2;
@@ -422,8 +443,8 @@ export class World {
       const i = this.trees.length;
       trunks.setMatrixAt(i, mat);
       crowns.setMatrixAt(i, mat);
-      const top = new THREE.Vector3(M.PALM_LEAN, M.PALM_H, 0).applyMatrix4(mat);
-      this.trees.push({ x, z, top: h + M.PALM_H * s, cx: top.x, cy: top.y, cz: top.z, cr: 2.8 * s });
+      const top = geo.canopy.clone().applyMatrix4(mat);
+      this.trees.push({ x, z, top: h + geo.height * s, cx: top.x, cy: top.y, cz: top.z, cr: geo.crownR * s });
     }
     trunks.count = crowns.count = this.trees.length;
     trunks.instanceMatrix.needsUpdate = crowns.instanceMatrix.needsUpdate = true;
@@ -468,7 +489,7 @@ export class World {
       this.addBubble(mx, top + 6, mz, 100);
     }
     // bubbles sitting on the water for swimmers
-    for (const [px, pz, rx, rz] of this.ponds) {
+    for (const [px, pz, rx, rz, frozen] of this.ponds) {
       const k = Math.max(2, Math.round((rx * rz) / 35));
       for (let i = 0; i < k; i++) {
         const a = this.rand() * 6.28, r = Math.sqrt(this.rand()) * 0.7;
@@ -495,6 +516,21 @@ export class World {
       }
     }
   }
+  buildIcebergs() {
+    let made = 0, tries = 0;
+    while (made < 12 && tries++ < 400) {
+      const x = lerp(this.minX - 40, this.maxX + 40, this.rand()), z = lerp(this.minZ - 40, this.maxZ + 40, this.rand());
+      const sd = this.landSD(x, z);
+      if (sd < 18 || sd > 70) continue;
+      const r = 4 + this.rand() * 9, h = 4 + this.rand() * 10;
+      const berg = M.makeIceberg(r, h);
+      berg.position.set(x, h / 2 - 1.5, z);
+      berg.rotation.y = this.rand() * 6;
+      this.group.add(berg);
+      made++;
+    }
+  }
+
   streamPoint(st, s) {
     let acc = 0;
     for (let i = 0; i < st.pts.length - 1; i++) {
@@ -509,14 +545,16 @@ export class World {
     // little swarms around the arena so a landing frog can chain them
     this.flies = [];
     const avoid = this.gimmickSpots();
-    const swarms = Math.max(6, Math.round((this.maxX - this.minX) * (this.maxZ - this.minZ) / 4000));
+    const swarms = this.theme === 'ice'
+      ? Math.max(3, Math.round((this.maxX - this.minX) * (this.maxZ - this.minZ) / 9000))
+      : Math.max(6, Math.round((this.maxX - this.minX) * (this.maxZ - this.minZ) / 4000));
     let tries = 0, made = 0;
     while (made < swarms && tries++ < 400) {
       const sx = lerp(this.minX, this.maxX, this.rand()), sz = lerp(this.minZ, this.maxZ, this.rand());
       const sh = this.height(sx, sz);
       if (sh < 0.5 || this.landSD(sx, sz) > -8 || avoid.some(([ax, az, r]) => Math.hypot(sx - ax, sz - az) < r)) continue;
       made++;
-      const n = 3 + Math.floor(this.rand() * 3);
+      const n = (this.theme === 'ice' ? 2 : 3) + Math.floor(this.rand() * 3);
       for (let k = 0; k < n; k++) {
         const x = sx + (this.rand() - 0.5) * 12, z = sz + (this.rand() - 0.5) * 12;
         const h = this.height(x, z);

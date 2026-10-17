@@ -139,6 +139,23 @@ function merge(parts) {
   return out;
 }
 export const PALM_H = 8, PALM_LEAN = 1.1;
+// snowy pine for Ice World
+export function makePineGeometry() {
+  const trunk = new THREE.CylinderGeometry(0.22, 0.34, 3, 6);
+  trunk.translate(0, 1.5, 0);
+  const parts = [];
+  const m = new THREE.Matrix4();
+  const tiers = [[2.0, 2.9, 3.2], [3.6, 2.3, 2.8], [5.0, 1.6, 2.4], [6.2, 0.9, 1.8]];
+  for (const [y, r, h] of tiers) {
+    m.makeTranslation(0, y + h / 2, 0);
+    parts.push({ geo: new THREE.ConeGeometry(r, h, 8), matrix: m.clone(), color: 0x2f6b4a });
+    // snow on top of each tier
+    m.makeTranslation(0, y + h * 0.78, 0);
+    parts.push({ geo: new THREE.ConeGeometry(r * 0.55, h * 0.45, 8), matrix: m.clone(), color: 0xf6fbff });
+  }
+  return { trunk, crown: merge(parts), canopy: new THREE.Vector3(0, 4.6, 0), height: 8, crownR: 2.6 };
+}
+
 export function makePalmGeometry() {
   const trunk = new THREE.CylinderGeometry(0.22, 0.38, PALM_H, 7, 6);
   trunk.translate(0, PALM_H / 2, 0);
@@ -173,13 +190,24 @@ export function makePalmGeometry() {
     m.makeTranslation(PALM_LEAN + Math.sin(a) * 0.3, PALM_H - 0.3, Math.cos(a) * 0.3);
     parts.push({ geo: nut, matrix: m.clone(), color: 0xc9a227 });
   }
-  return { trunk, crown: merge(parts) };
+  return { trunk, crown: merge(parts), canopy: new THREE.Vector3(PALM_LEAN, PALM_H, 0), height: PALM_H, crownR: 2.8 };
 }
 
 // ---------- elephant (+z forward) ----------
-export function makeElephant() {
+export function makeElephant(woolly = false) {
   const g = new THREE.Group();
-  const skin = lam(0xc49a86), dark = lam(0x9c7666), ivory = lam(0xfff6e4);
+  const skin = lam(woolly ? 0x7a4a2b : 0xc49a86), dark = lam(woolly ? 0x4f2e19 : 0x9c7666), ivory = lam(0xfff6e4);
+  if (woolly) {
+    // shaggy fur hanging off the body and a tuft on the head
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2;
+      const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.0, 5), dark);
+      tuft.rotation.x = Math.PI;
+      tuft.position.set(Math.cos(a) * 1.85, 2.5, Math.sin(a) * 2.5);
+      g.add(tuft);
+    }
+    g.add(blob(SPH, dark, 1.0, 0.7, 1.0, 0, 6.0, 2.6));
+  }
   g.add(blob(SPH, skin, 2.1, 1.9, 2.9, 0, 3.6, 0));
   g.add(blob(SPH, dark, 1.7, 1.3, 1.9, 0, 4.8, 0.6));
   g.add(blob(SPH, skin, 1.45, 1.5, 1.4, 0, 4.6, 2.9));
@@ -188,7 +216,9 @@ export function makeElephant() {
     g.add(blob(SPH, dark, 0.3, 1.1, 0.9, s * 1.35, 4.5, 2.4));
     g.add(blob(SPH_LO, lam(0xffffff), 0.32, 0.36, 0.2, s * 0.68, 5.0, 4.0));
     g.add(blob(SPH_LO, lam(0x111111), 0.16, 0.2, 0.1, s * 0.72, 5.0, 4.17));
-    const tusk = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.14, 6, 12, Math.PI * 0.85), ivory);
+    const tusk = woolly
+      ? new THREE.Mesh(new THREE.TorusGeometry(1.35, 0.2, 6, 14, Math.PI * 1.15), ivory)
+      : new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.14, 6, 12, Math.PI * 0.85), ivory);
     tusk.rotation.y = -Math.PI / 2;
     tusk.rotation.x = Math.PI;
     tusk.position.set(s * 0.7, 4.0, 3.5);
@@ -288,7 +318,7 @@ export function makeWeb(size = WEB_SIZE) {
 }
 
 // ---------- snake: a big round head that pops in and out of a hole ----------
-export function makeSnake() {
+export function makeSnake(white = false) {
   const g = new THREE.Group();
   const hole = new THREE.Mesh(new THREE.CircleGeometry(1.7, 20), new THREE.MeshBasicMaterial({ color: 0x2b1a0e }));
   hole.rotation.x = -Math.PI / 2; hole.position.y = 0.06;
@@ -298,7 +328,7 @@ export function makeSnake() {
   g.add(rim);
   const body = new THREE.Group();
   g.add(body);
-  const green = lam(0x3fae49), belly = lam(0xf2e05a);
+  const green = lam(white ? 0xf4f8fc : 0x3fae49), belly = lam(white ? 0xc9d9e8 : 0xf2e05a);
   for (let i = 0; i < 6; i++) {
     const r = 0.62 - i * 0.03;
     body.add(blob(SPH, i % 2 ? belly : green, r, 0.45, r, 0, 0.3 + i * 0.6, 0));
@@ -632,4 +662,50 @@ export function makeMystery() {
   glow.scale.set(9, 9, 1); glow.position.y = 1;
   g.add(glow);
   return { group: g, balloon, string, glow, bMat };
+}
+
+// ---------- ice floe: Ice World's spinning lily pad ----------
+export function makeIceFloe(r = 2.5) {
+  const g = new THREE.Group();
+  const geo = new THREE.CylinderGeometry(r, r * 0.9, 0.35, 7);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const a = Math.atan2(p.getZ(i), p.getX(i));
+    const k = 1 + 0.12 * Math.sin(a * 3 + 1) + 0.08 * Math.cos(a * 5);
+    p.setX(i, p.getX(i) * k); p.setZ(i, p.getZ(i) * k);
+  }
+  geo.computeVertexNormals();
+  g.add(new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: 0xe8f7ff, shininess: 80, flatShading: true })));
+  const crack = blob(new THREE.BoxGeometry(1, 1, 1), lam(0xa9d8f0), r * 1.2, 0.02, 0.08, 0, 0.19, 0);
+  crack.rotation.y = 0.7;
+  g.add(crack);
+  return { group: g };
+}
+
+export function makeIceberg(r, h) {
+  const geo = new THREE.ConeGeometry(r, h, 6, 2);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    p.setX(i, p.getX(i) * (0.8 + Math.random() * 0.4));
+    p.setZ(i, p.getZ(i) * (0.8 + Math.random() * 0.4));
+  }
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo, new THREE.MeshPhongMaterial({ color: 0xeaf6ff, shininess: 60, flatShading: true }));
+}
+
+// ---------- falling snow ----------
+export function makeSnow(n = 1400, size = 70) {
+  const pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    pos[i * 3] = (Math.random() - 0.5) * size;
+    pos[i * 3 + 1] = Math.random() * 40 - 5;
+    pos[i * 3 + 2] = (Math.random() - 0.5) * size;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.35, map: getGlowTex(),
+    transparent: true, depthWrite: false, opacity: 0.9 }));
+  pts.frustumCulled = false;
+  pts.userData.size = size;
+  return pts;
 }

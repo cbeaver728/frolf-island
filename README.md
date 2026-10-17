@@ -5,6 +5,16 @@ launch your frog, and pile up points on the way to the cup.
 
 Play: https://cbeaver728.github.io/frolf-island/
 
+## Worlds
+
+Pick a world on the title screen:
+
+- **Tropical Island**: palms, lily pads, elephants and green snakes.
+- **Ice World**: six snowy arenas with falling snow, snowy pines and icebergs. Ice sheets and
+  frozen ponds are slippery, so frogs skid across them instead of hopping. Some ponds are open
+  water (with spinning ice floes instead of lily pads). Woolly mammoths, white snakes, fewer flies,
+  and whirlpools on land as well as in water. Best scores are kept per world.
+
 ## How it plays
 
 - **Aim**: put the target anywhere inside your reach (the yellow dotted circle). Tap the
@@ -48,7 +58,7 @@ Play: https://cbeaver728.github.io/frolf-island/
 
 Zero build step: plain ES modules plus a vendored `three.module.min.js` (r170).
 
-- `src/holes.js` - arena layouts (land circles, lakes, streams, mountains, webs, belts,
+- `src/holes.js` - arena layouts for both worlds (`HOLES`, `ICE_HOLES`, `WORLDS`) (land circles, lakes, streams, mountains, webs, belts,
   elephants, snakes) as plain data.
 - `src/world.js` - heightfield terrain, surfaces, trees, bubbles, gimmick animation.
 - `src/main.js` - turns, aiming, power meter, flight physics, scoring, camera, HUD.

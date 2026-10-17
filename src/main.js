@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { HOLES } from './holes.js';
+import { WORLDS } from './holes.js';
 import { World, SNAKE_R, ELEPHANT_R } from './world.js';
 import * as M from './models.js';
 import { sfx, unlockAudio } from './audio.js';
@@ -41,11 +41,38 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xd6f1ff, 150, 560);
 const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 2500);
-scene.add(M.makeSky());
+const sky = M.makeSky();
+scene.add(sky);
 const sea = M.makeSea();
 scene.add(sea);
 scene.add(M.makeClouds());
-scene.add(new THREE.HemisphereLight(0xe8f6ff, 0x5c8a3c, 1.5));
+const hemi = new THREE.HemisphereLight(0xe8f6ff, 0x5c8a3c, 1.5);
+scene.add(hemi);
+const snow = M.makeSnow();
+snow.visible = false;
+scene.add(snow);
+// sky, fog, sea and light for each world
+const THEMES = {
+  tropical: { top: 0x2f8cf0, mid: 0x8fd0ff, low: 0xe4f7ff, fog: 0xd6f1ff, sea: 0x27b0e6, hemiSky: 0xe8f6ff, hemiGround: 0x5c8a3c, snow: false },
+  ice: { top: 0x5f8fc4, mid: 0xb8d3ec, low: 0xf2f7fd, fog: 0xe4eef8, sea: 0x2a6890, hemiSky: 0xf2f8ff, hemiGround: 0x9eb2c6, snow: true },
+};
+function applyTheme(name) {
+  const t = THEMES[name] || THEMES.tropical;
+  sky.material.uniforms.top.value.set(t.top);
+  sky.material.uniforms.mid.value.set(t.mid);
+  sky.material.uniforms.low.value.set(t.low);
+  scene.fog.color.set(t.fog);
+  sea.material.color.set(t.sea);
+  hemi.color.set(t.hemiSky);
+  hemi.groundColor.set(t.hemiGround);
+  snow.visible = t.snow;
+  document.body.dataset.world = name;
+}
+function makeWorld(key, i) {
+  const W = WORLDS[key];
+  applyTheme(W.theme);
+  return new World(W.holes[i], i + (key === 'ice' ? 100 : 0), W.theme);
+}
 const sun = new THREE.DirectionalLight(0xfff4dd, 1.9);
 sun.position.set(60, 100, 40);
 scene.add(sun);
@@ -84,9 +111,11 @@ rangeRing.visible = false;
 scene.add(rangeRing);
 
 // ---------- state ----------
-const setup = { slots: ['you', 'cpu', 'off', 'off'], holes: 6 };
+const setup = { slots: ['you', 'cpu', 'off', 'off'], holes: 6, world: 'tropical' };
 let best = 0;
-try { best = Number(localStorage.getItem('frolf.best')) || 0; } catch { /* storage blocked */ }
+const bestKey = () => (setup.world === 'tropical' ? 'frolf.best' : 'frolf.best.' + setup.world);
+function loadBest() { try { best = Number(localStorage.getItem(bestKey())) || 0; } catch { best = 0; } }
+loadBest();
 
 let world = null, players = [], holeList = [], holeIdx = 0, cur = null;
 let phase = 'title', phaseT = 0, time = 0;
@@ -279,6 +308,7 @@ $('pressBtn').addEventListener('pointerdown', (e) => {
 
 // ---------- title / setup ----------
 function renderSetup() {
+  for (const b of document.querySelectorAll('#worlds .world')) b.classList.toggle('on', b.dataset.w === setup.world);
   $('slots').innerHTML = setup.slots.map((s, i) => `
     <button class="slot ${s}" data-i="${i}">
       <i style="background:${PLAYER_DEFS[i].css}"></i>${PLAYER_DEFS[i].name}
@@ -296,6 +326,14 @@ $('slots').addEventListener('click', (e) => {
   renderSetup();
 });
 $('holesBtn').addEventListener('click', () => { setup.holes = setup.holes === 6 ? 3 : 6; renderSetup(); });
+$('worlds').addEventListener('click', (e) => {
+  const b = e.target.closest('.world');
+  if (!b || b.dataset.w === setup.world) return;
+  setup.world = b.dataset.w;
+  loadBest();
+  showBackdrop();
+  renderSetup();
+});
 $('playBtn').addEventListener('click', () => { unlockAudio(); sfx.croak(); startGame(); });
 renderSetup();
 
@@ -307,7 +345,7 @@ function startGame() {
     bag: { goggles: 1, spring: 1, sticky: 1, boots: 1 }, equipped: null,
   }).filter(Boolean);
   players.forEach(p => scene.add(p.frog.group, p.shadow));
-  holeList = HOLES.slice(0, setup.holes);
+  holeList = WORLDS[setup.world].holes.slice(0, setup.holes);
   holeIdx = 0;
   $('title').classList.add('hidden');
   $('hud').classList.remove('hidden');
@@ -317,7 +355,7 @@ function startGame() {
 function loadHole() {
   if (world) { scene.remove(world.group); world.dispose(); }
   const h = holeList[holeIdx];
-  world = new World(h, HOLES.indexOf(h));
+  world = makeWorld(setup.world, holeIdx);
   scene.add(world.group);
   players.forEach((p, i) => {
     p.pos.copy(world.tee);
@@ -704,6 +742,14 @@ function land(h) {
   if (!s.contacted) { s.contacted = true; s.hopsLeft = (HOP_COUNT[surf] ?? 1) + (s.item === 'boots' ? 3 : 0); }
   // Sticky Feet: no bouncing, no hopping, stop right here
   if (s.item === 'sticky' && surf !== 'green') { p.y = h; v.set(0, 0, 0); popup('Stuck!', p, 'note'); return restHere(); }
+  // ice: no bounce, no hops, the frog skids along keeping a good part of its speed
+  if (surf === 'ice') {
+    p.y = h;
+    const keep = s.hopping ? 0.9 : 0.6;
+    startSlide(true);
+    s.slideV.set(v.x * keep, 0, v.z * keep);
+    return;
+  }
   if (surf === 'sand') { sfx.thud(); popup('Sand!', p, 'note'); return restHere(); }
   const n = world.normal(p.x, p.z);
   const vn = v.dot(n);
@@ -918,20 +964,23 @@ function beltStep(dt) {
 }
 
 // ---------- mountains: steep ground sends the frog sliding ----------
-function startSlide() {
+function startSlide(onIce = false) {
   const s = shot;
-  s.slides = (s.slides || 0) + 1;
+  if (!onIce) s.slides = (s.slides || 0) + 1;
   s.state = 'slide'; s.slideT = 0; s.tick = 0;
   s.slideV = new THREE.Vector3();
-  if (!s.used.has('slide')) { s.used.add('slide'); popup('Wheee!', s.pos, 'note'); }
+  const key = onIce ? 'ice' : 'slide';
+  if (!s.used.has(key)) { s.used.add(key); popup(onIce ? 'Slip-sliding!' : 'Wheee!', s.pos, 'note'); }
 }
 function slideStep(dt) {
   const s = shot, p = s.pos, v = s.slideV;
   s.slideT += dt;
   const n = world.normal(p.x, p.z);
+  const icy = world.surface(p.x, p.z) === 'ice';
   v.x += n.x * G * dt; v.z += n.z * G * dt;      // the normal's sideways part points downhill
-  v.multiplyScalar(Math.pow(0.5, dt));
-  if (v.length() > 18) v.setLength(18);
+  // ice barely slows you; a steep slope a bit; flat snow or grass stops you fast
+  v.multiplyScalar(Math.pow(icy ? 0.4 : n.y < 0.86 ? 0.5 : 0.03, dt));
+  if (v.length() > 24) v.setLength(24);
   p.x += v.x * dt; p.z += v.z * dt;
   const h = world.height(p.x, p.z);
   if (h < 0.02) {
@@ -945,7 +994,9 @@ function slideStep(dt) {
   checkPickups(p.x, p.y + 0.4, p.z);
   checkMystery();
   if (checkPortal()) return;
-  if ((Math.hypot(n.x, n.z) < 0.2 && v.length() < 2) || s.slideT > 8) restHere();
+  for (const w of world.webs) if (!s.used.has(w) && inWeb(w, p.x, p.z)) { s.vel.set(v.x, -1, v.z); return webBounce(w); }
+  const stopped = icy ? v.length() < 0.5 : Math.hypot(n.x, n.z) < 0.2 && v.length() < 2;
+  if (stopped || s.slideT > 12) restHere();
 }
 
 // ---------- snakes: grab, shake, throw (into a web if one is close) ----------
@@ -1170,7 +1221,7 @@ function endHole() {
     const top = sorted[0];
     const humanBest = Math.max(0, ...players.filter(p => !p.cpu).map(p => p.total));
     let newBest = false;
-    if (humanBest > best) { best = humanBest; newBest = true; try { localStorage.setItem('frolf.best', String(best)); } catch { /* ignore */ } }
+    if (humanBest > best) { best = humanBest; newBest = true; try { localStorage.setItem(bestKey(), String(best)); } catch { /* ignore */ } }
     sfx.fanfare();
     $('sumTitle').textContent = players.length > 1 ? `${top.def.name} wins!` : 'Course complete!';
     $('sumSub').textContent = newBest ? `New best score: ${best.toLocaleString()}!` : best ? `Best: ${best.toLocaleString()}` : '';
@@ -1340,6 +1391,17 @@ function tick(dt) {
   phaseT += dt;
   if (world) world.update(dt, time);
   sea.position.y = Math.sin(time * 0.8) * 0.05;
+  if (snow.visible) {
+    const a = snow.geometry.attributes.position;
+    for (let i = 0; i < a.count; i++) {
+      let y = a.getY(i) - dt * 3.2;
+      if (y < -5) y += 40;
+      a.setY(i, y);
+      a.setX(i, a.getX(i) + Math.sin(time * 0.7 + i) * dt * 0.4);
+    }
+    a.needsUpdate = true;
+    snow.position.set(camera.position.x, camera.position.y - 12, camera.position.z);
+  }
 
   if (phase === 'title') {
     const a = time * 0.06;
@@ -1484,13 +1546,15 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-// title backdrop: show hole 1 behind the menu
-(function titleBackdrop() {
-  world = new World(HOLES[0], 0);
+// title backdrop: show the chosen world's first hole behind the menu
+function showBackdrop() {
+  if (world) { scene.remove(world.group); world.dispose(); }
+  world = makeWorld(setup.world, 0);
   scene.add(world.group);
   camPos.set(30, 26, 20); camLook.set(0, 0, -60);
   camPosT.copy(camPos); camLookT.copy(camLook);
-})();
+}
+showBackdrop();
 
 // test hook: lets tooling drive frames when the tab is hidden
 window.__frolf = {

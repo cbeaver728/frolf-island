@@ -99,7 +99,7 @@ button { font-family: var(--font); cursor: pointer; border: 0; touch-action: man
 #swingBtn { background: #ff4f7b !important; box-shadow: 0 5px 0 #a3264a !important; font-size: 24px !important; letter-spacing: 1px; }
 #bottom[data-mode="meter"] #swingBtn { background: #ffb52e !important; box-shadow: 0 5px 0 #a8701a !important; animation: pulse 0.4s infinite alternate; }
 @keyframes pulse { to { transform: scale(1.04); } }
-#hint { text-align: center; font-size: 13px; text-shadow: 0 1px 2px rgba(0,0,0,0.6); }
+#hint { text-align: center; font-size: 13px; text-shadow: 0 1px 2px rgba(0,0,0,0.6); background: rgba(12, 40, 70, 0.45); border-radius: 10px; padding: 2px 8px; align-self: center; }
 
 /* ---------- title & summary ---------- */
 #title, #summary {
@@ -184,3 +184,14 @@ h2 { margin: 0; font-size: 34px; color: #2f8cf0; }
 #bag .item em { font-style: normal; font-weight: 800; color: #8a5cf0; }
 #bag .item.on { border-color: #ffb52e; background: #fff4d6; }
 #bag .item:disabled { opacity: 0.35; }
+
+/* ---------- world picker ---------- */
+#worlds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+#worlds .world {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 8px; border-radius: 16px;
+  background: #e7f1fb; color: var(--ink); font-size: 16px; font-weight: 800; border: 3px solid transparent;
+}
+#worlds .world span { font-size: 30px; line-height: 1.1; }
+#worlds .world.on { border-color: #2f8cf0; background: #fff; box-shadow: 0 4px 0 #2f8cf0; }
+body[data-world="ice"] h1 span { color: #7fd4ff; }
+body[data-world="ice"] #title, body[data-world="ice"] #summary { background: linear-gradient(180deg, rgba(120,170,220,0.25), rgba(40,70,110,0.55)); }
