@@ -652,7 +652,7 @@ export class World {
       for (let i = 0; i < cars + 1; i++) {
         const car = M.makeTrainCar(i === 0 ? color : 0xffd23f + i * 0x101010, i === 0);
         this.group.add(car.group);
-        const c = { model: car, gap: i * 5, bubble: null };
+        const c = { model: car, gap: i * 5, bubble: null, engine: i === 0 };
         if (i > 0) {
           // every car carries a big, valuable balloon
           this.addBubble(0, 0, 0, 300);

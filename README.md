@@ -60,7 +60,8 @@ fling them anywhere, and web chains where each web tosses you onto the next.
 - **Mountains** have steep sides you slide down (no points) and treasure bubbles on top.
 - **Web chains**: land on the first web and each one throws you onto the next, doubling as you go.
 - **Tornados** wander about; fly into one (or stop beside it) and it spins you up and flings you
-  somewhere random. **Trains** loop their tracks carrying 300-point balloons: time your shot.
+  somewhere random. **Trains** loop their tracks carrying 300-point balloons: time your shot. Cars are solid:
+  a frog bounces off the roof or sides, and a train shoves any frog sitting on the tracks aside.
 - **Gaps** of open water cut across some holes: fall in and you are out of bounds, but stepping
   stones (grippy platforms with bubbles) let you hop across.
 - **"?" circles** with a balloon: land on one for +50 and a random backpack item.

@@ -778,6 +778,7 @@ function flyStep(dt) {
       award(100, 'FROG BONK!', p);
     }
   }
+  if (world.trains.length && trainHit(s, prevY)) return;
   const hd = Math.hypot(p.x - world.cup.x, p.z - world.cup.z);
   if (hd < CUP_R && p.y - world.cup.y < 0.9 && v.y < 2) {
     s.state = 'sink'; s.timer = 0.7;
@@ -921,6 +922,71 @@ function lavaHop() {
   s.lastDir.copy(dirOf(yaw));
   s.state = 'fly'; s.hopping = true; s.hopsLeft = 0; s.contacted = true;
   p.y += 0.05;
+}
+
+// ---------- trains are solid ----------
+const CAR_HX = 1.25, CAR_HZ = 2.05;
+// a car's frame: position, forward and right directions, roof height
+function carFrame(t, c) {
+  const g = c.model.group, yaw = g.rotation.y;
+  return { pos: g.position, fwd: new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)), right: new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)),
+    top: g.position.y + (c.engine ? 2.2 : 1.9), speed: t.speed };
+}
+function trainHit(s, prevY) {
+  const p = s.pos, v = s.vel;
+  for (const t of world.trains) for (const c of t.cars) {
+    const f = carFrame(t, c);
+    const dx = p.x - f.pos.x, dz = p.z - f.pos.z;
+    const lx = dx * f.right.x + dz * f.right.z, lz = dx * f.fwd.x + dz * f.fwd.z;
+    const hx = CAR_HX + 0.35, hz = CAR_HZ + 0.35;
+    if (Math.abs(lx) >= hx || Math.abs(lz) >= hz || p.y > f.top + 0.05 || p.y + 0.8 < f.pos.y) continue;
+    s.curveDone = true;
+    if (prevY >= f.top - 0.1 && v.y <= 0) {
+      // landed on the roof: bounce off, carried a little by the moving train
+      p.y = f.top + 0.05;
+      v.y = Math.max(-v.y * 0.5, 6);
+      v.x = v.x * 0.5 + f.fwd.x * f.speed * 0.8;
+      v.z = v.z * 0.5 + f.fwd.z * f.speed * 0.8;
+    } else {
+      // hit a side or an end: rebound away from the car
+      const penX = hx - Math.abs(lx), penZ = hz - Math.abs(lz);
+      const n = penX < penZ ? f.right.clone().multiplyScalar(Math.sign(lx) || 1) : f.fwd.clone().multiplyScalar(Math.sign(lz) || 1);
+      const vn = v.x * n.x + v.z * n.z;
+      if (vn < 0) { v.x -= 1.5 * vn * n.x; v.z -= 1.5 * vn * n.z; }
+      v.x = v.x * 0.5 + f.fwd.x * f.speed * 0.5;
+      v.z = v.z * 0.5 + f.fwd.z * f.speed * 0.5;
+      const pen = Math.min(penX, penZ) + 0.05;
+      p.x += n.x * pen; p.z += n.z * pen;
+    }
+    s.hopping = true; s.hopsLeft = 0;
+    if ((s.trainBonkT || 0) < s.t) { s.trainBonkT = s.t + 0.5; sfx.bonk(); sfx.thud(); popup('Clang!', p, 'note'); }
+    return false;   // keep flying after the bounce
+  }
+  return false;
+}
+// a train running into a frog that's sitting still shoves it off the tracks
+function trainPush() {
+  for (const pl of players) {
+    if (pl.holed || (pl.strokes === 0 && pl !== cur)) continue;
+    if (shot && shot.p === pl && shot.state !== 'done') continue;
+    for (const t of world.trains) for (const c of t.cars) {
+      const f = carFrame(t, c);
+      const dx = pl.pos.x - f.pos.x, dz = pl.pos.z - f.pos.z;
+      const lx = dx * f.right.x + dz * f.right.z, lz = dx * f.fwd.x + dz * f.fwd.z;
+      if (Math.abs(lx) >= CAR_HX + 0.7 || Math.abs(lz) >= CAR_HZ + 0.7) continue;
+      const ok = (q) => !['sea', 'pond', 'lava'].includes(world.surface(q.x, q.z)) && world.height(q.x, q.z) > 0.2;
+      const side = lx >= 0 ? 1 : -1;
+      let to = f.pos.clone().addScaledVector(f.right, side * 3.6).addScaledVector(f.fwd, lz);
+      if (!ok(to)) to = f.pos.clone().addScaledVector(f.right, -side * 3.6).addScaledVector(f.fwd, lz);
+      if (!ok(to)) to = world.nearestSafe(to);
+      pl.pos.set(to.x, world.height(to.x, to.z), to.z);
+      pl.bumpT = 0.45;
+      sfx.bonk();
+      popup('Bump!', pl.pos.clone().add(tmp.set(0, 1, 0)), 'note');
+      if (pl === cur && (phase === 'aim' || phase === 'cpu' || phase === 'meter')) updateAim();
+      break;
+    }
+  }
 }
 
 // ---------- tornados: whisk the frog up in a spiral and fling it anywhere in the arena ----------
@@ -1559,6 +1625,7 @@ function tick(dt) {
     snow.position.set(camera.position.x, camera.position.y - 12, camera.position.z);
   }
 
+  if (world && world.trains && world.trains.length && phase !== 'title' && phase !== 'intro') trainPush();
   if (phase === 'title') {
     const a = time * 0.06;
     camPosT.set(Math.cos(a) * 55, 24, -50 + Math.sin(a) * 55);
@@ -1634,8 +1701,12 @@ function tick(dt) {
       p.frog.setStretch(0);
     } else {
       g.position.copy(p.pos);
+      if (p.bumpT > 0) {
+        p.bumpT = Math.max(0, p.bumpT - dt);
+        g.position.y += Math.sin((1 - p.bumpT / 0.45) * Math.PI) * 1.2;
+      }
       g.rotation.x = 0;
-      p.frog.setStretch(0);
+      p.frog.setStretch(p.bumpT > 0 ? 1 : 0);
     }
     const sh = p.shadow;
     sh.visible = g.visible;
@@ -1720,6 +1791,7 @@ window.__frolf = {
   setAim(yaw, dist, loft) { aimYaw = yaw; if (dist != null) aimDist = dist; if (loft != null) cur.deg = loft > 5 ? loft : LOFTS[loft].deg; updateAim(); },
   shape(deg, curve) { if (deg != null) cur.deg = deg; if (curve != null) cur.curve = curve; updateAim(); },
   get path() { return pathPts.map(q => q.clone()); },
+  get frogs() { return players.map(p => ({ n: p.def.name, pos: p.pos.clone(), strokes: p.strokes })); },
   aimAt(x, z) { setAimPoint(new THREE.Vector3(x, 0, z)); },
   get aim() { return { yaw: aimYaw, dist: aimDist, max: aimMax, power: aimPower, speed: meterSpeed, land: aimLand.clone() }; },
   get world() { return world; },
