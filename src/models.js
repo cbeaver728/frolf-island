@@ -235,7 +235,7 @@ export function makeElephant() {
 // ---------- spider web trampoline, stretched just above the ground ----------
 let webTex = null;
 export const WEB_SIZE = 7, WEB_Y = 0.35;
-export function makeWeb() {
+export function makeWeb(size = WEB_SIZE) {
   if (!webTex) {
     webTex = canvasTex(256, 256, (c, w) => {
       c.strokeStyle = 'rgba(255,255,255,0.95)';
@@ -260,12 +260,12 @@ export function makeWeb() {
     });
   }
   const g = new THREE.Group();
-  const s = WEB_SIZE / 2;
+  const s = size / 2;
   for (const [x, z] of [[-s, -s], [s, -s], [-s, s], [s, s]]) {
     g.add(blob(CYL, lam(0x8a5a2b), 0.16, 2.6, 0.16, x, WEB_Y + 0.25 - 1.3, z));
     g.add(blob(SPH_LO, lam(0xffd23f), 0.26, 0.26, 0.26, x, WEB_Y + 0.3, z));
   }
-  const web = new THREE.Mesh(new THREE.PlaneGeometry(WEB_SIZE, WEB_SIZE),
+  const web = new THREE.Mesh(new THREE.PlaneGeometry(size, size),
     new THREE.MeshBasicMaterial({ map: webTex, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
   web.rotation.x = -Math.PI / 2;
   web.position.y = WEB_Y;
@@ -282,6 +282,7 @@ export function makeWeb() {
     }
   }
   spider.position.y = WEB_Y;
+  spider.scale.setScalar(size / WEB_SIZE);
   g.add(spider);
   return { group: g, spider, web };
 }
@@ -433,7 +434,12 @@ function numberTex(text, color) {
 const BUBBLE_GEO = new THREE.SphereGeometry(1, 20, 14);
 export function makeBubble(value) {
   const g = new THREE.Group();
-  const r = value >= 300 ? 1.6 : value >= 100 ? 1.3 : 1.05;
+  // halo used when the bubble sits on the aimed path
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: getGlowTex(), color: 0xffe14d, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false }));
+  halo.visible = false;
+  g.add(halo);
+  const r = { 10: 0.9, 20: 1.0, 30: 1.1, 50: 1.3, 100: 1.75, 300: 2.5 }[value] || 1;
   const shell = new THREE.Mesh(BUBBLE_GEO, new THREE.MeshPhongMaterial({
     color: BUBBLE_COLORS[value] || 0x9ad8ff, transparent: true, opacity: 0.38, shininess: 140,
     specular: 0xffffff, depthWrite: false }));
@@ -442,7 +448,8 @@ export function makeBubble(value) {
   const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: numberTex('+' + value, '#ffffff'), depthWrite: false }));
   label.scale.set(1.9 * r, 0.95 * r, 1);
   g.add(label);
-  return { group: g, radius: r, shell };
+  halo.scale.setScalar(r * 3.6);
+  return { group: g, radius: r, shell, halo };
 }
 
 export function makeFly() {
@@ -529,4 +536,100 @@ export function makeClouds() {
     g.add(c);
   }
   return g;
+}
+
+// ---------- lily pad: spins with the frog on it, then flings it ----------
+export function makeLilyPad(r = 2.4) {
+  const g = new THREE.Group();
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.18, 28, 1, false, 0.35, Math.PI * 2 - 0.7), lam(0x67c23a));
+  g.add(pad);
+  const top = new THREE.Mesh(new THREE.CircleGeometry(r * 0.96, 28, 0.35, Math.PI * 2 - 0.7), lam(0x8fdb4f));
+  top.rotation.x = -Math.PI / 2; top.position.y = 0.1;
+  g.add(top);
+  for (let i = 0; i < 6; i++) {
+    const vein = blob(new THREE.BoxGeometry(1, 1, 1), lam(0x5aa833), r * 0.85, 0.02, 0.06, 0, 0.11, 0);
+    vein.rotation.y = 0.5 + (i / 6) * (Math.PI * 2 - 1);
+    vein.position.set(Math.cos(vein.rotation.y) * r * 0.42, 0.11, -Math.sin(vein.rotation.y) * r * 0.42);
+    g.add(vein);
+  }
+  const flower = new THREE.Group();
+  for (let i = 0; i < 6; i++) {
+    const p = blob(SPH_LO, lam(0xff9ccd), 0.16, 0.06, 0.32, Math.sin(i) * 0.2, 0.2, Math.cos(i) * 0.2);
+    p.rotation.y = i;
+    flower.add(p);
+  }
+  flower.add(blob(SPH_LO, lam(0xffe14d), 0.12, 0.08, 0.12, 0, 0.25, 0));
+  flower.position.set(-r * 0.55, 0, r * 0.3);
+  g.add(flower);
+  return { group: g };
+}
+
+// ---------- whirlpool portal ----------
+let swirlTex = null;
+export function makePortal(color) {
+  if (!swirlTex) {
+    swirlTex = canvasTex(256, 256, (c, w) => {
+      const cx = w / 2;
+      const gr = c.createRadialGradient(cx, cx, 0, cx, cx, cx);
+      gr.addColorStop(0, 'rgba(10,20,60,1)'); gr.addColorStop(0.6, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = gr; c.fillRect(0, 0, w, w);
+      c.strokeStyle = 'rgba(255,255,255,0.95)'; c.lineCap = 'round';
+      for (let arm = 0; arm < 4; arm++) {
+        c.lineWidth = 9;
+        c.beginPath();
+        for (let t = 0; t < 1; t += 0.02) {
+          const a = arm * Math.PI / 2 + t * 5, r = 8 + t * (cx - 14);
+          const x = cx + Math.cos(a) * r, y = cx + Math.sin(a) * r;
+          t ? c.lineTo(x, y) : c.moveTo(x, y);
+        }
+        c.stroke();
+      }
+    });
+  }
+  const g = new THREE.Group();
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(2.6, 32),
+    new THREE.MeshBasicMaterial({ map: swirlTex, color, transparent: true, depthWrite: false }));
+  disc.rotation.x = -Math.PI / 2; disc.position.y = 0.06;
+  g.add(disc);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(2.7, 0.18, 6, 32), new THREE.MeshBasicMaterial({ color }));
+  ring.rotation.x = Math.PI / 2; ring.position.y = 0.08;
+  g.add(ring);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: getGlowTex(), color, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false }));
+  glow.scale.set(7, 3, 1); glow.position.y = 0.8;
+  g.add(glow);
+  return { group: g, disc };
+}
+
+// ---------- mystery circle: a "?" pad with a balloon tied above it ----------
+let qTex = null;
+export function makeMystery() {
+  if (!qTex) {
+    qTex = canvasTex(128, 128, (c, w) => {
+      c.fillStyle = '#ffd23f'; c.beginPath(); c.arc(w / 2, w / 2, w / 2 - 4, 0, Math.PI * 2); c.fill();
+      c.lineWidth = 8; c.strokeStyle = '#ff4f7b'; c.stroke();
+      c.fillStyle = '#ff4f7b'; c.font = 'bold 90px "Baloo 2", system-ui, sans-serif';
+      c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('?', w / 2, w / 2 + 6);
+    });
+  }
+  const g = new THREE.Group();
+  const pad = new THREE.Mesh(new THREE.CircleGeometry(2.6, 32), new THREE.MeshBasicMaterial({ map: qTex, transparent: true }));
+  pad.rotation.x = -Math.PI / 2; pad.position.y = 0.08;
+  g.add(pad);
+  const balloon = new THREE.Group();
+  const bMat = new THREE.MeshPhongMaterial({ color: 0xff4f7b, shininess: 90, emissive: 0x000000 });
+  balloon.add(blob(SPH, bMat, 0.9, 1.1, 0.9, 0, 0, 0));
+  balloon.add(blob(SPH_LO, bMat, 0.18, 0.18, 0.18, 0, -1.1, 0));
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: qTex, depthWrite: false }));
+  label.scale.set(1.1, 1.1, 1); label.position.set(0, 0.1, 0.95);
+  balloon.add(label);
+  balloon.position.y = 5;
+  g.add(balloon);
+  const string = blob(CYL, lam(0xffffff), 0.02, 4, 0.02, 0, 2, 0);
+  g.add(string);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: getGlowTex(), color: 0xffe14d, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0 }));
+  glow.scale.set(9, 9, 1); glow.position.y = 1;
+  g.add(glow);
+  return { group: g, balloon, string, glow, bMat };
 }

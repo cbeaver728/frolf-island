@@ -19,7 +19,16 @@ const PLAYER_DEFS = [
   { name: 'Gold', color: 0xffb52e, css: '#ffb52e' },
 ];
 // sinking it is worth less than a good combo run; fewer strokes still pays
-const HOLE_BONUS = [0, 1500, 800, 500, 350, 250, 200, 150, 100];
+const HOLE_BONUS = [0, 1000, 600, 400, 300, 200, 150, 100, 50];
+// backpack items: everyone starts each game with one of each; "?" circles hand out more
+const ITEMS = {
+  goggles: { icon: '👀', name: 'Fly Eyes', desc: 'See and eat flies twice as far away' },
+  spring: { icon: '🚀', name: 'Rocket Launch', desc: 'Launch about 30% farther' },
+  sticky: { icon: '🍯', name: 'Sticky Feet', desc: 'No hopping: stop where you land' },
+  boots: { icon: '🦘', name: 'Super Hops', desc: 'Bigger, more hops after landing' },
+};
+const ITEM_KEYS = Object.keys(ITEMS);
+const SPRING = 1.14;          // launch-speed boost from Rocket Launch (about 1.3x carry)
 const HOP_SPEED = { fairway: 4.4, green: 3.2, rough: 2.4 };
 const HOP_COUNT = { fairway: 2, green: 2, rough: 1, sand: 0 };
 const BOUNCE = { fairway: [0.22, 0.42], green: [0.15, 0.3], rough: [0.12, 0.3] };
@@ -99,8 +108,9 @@ const dirOf = (yaw) => new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
 const yawTo = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
 
 // ---------- physics helpers ----------
+const boost = () => (cur && cur.equipped === 'spring' ? SPRING : 1);
 function launchVel(yaw, deg, p) {
-  const s = VMAX * Math.sqrt(0.05 + 0.95 * p);
+  const s = VMAX * boost() * Math.sqrt(0.05 + 0.95 * p);
   const a = (deg * Math.PI) / 180;
   return new THREE.Vector3(Math.sin(yaw) * Math.cos(a) * s, Math.sin(a) * s, Math.cos(yaw) * Math.cos(a) * s);
 }
@@ -108,19 +118,19 @@ function seatPos(rest, yaw) {
   return new THREE.Vector3(rest.x + Math.sin(yaw) * 1.0, rest.y + 0.2, rest.z + Math.cos(yaw) * 1.0);
 }
 // ballistic preview ignoring gimmicks; fills `pts` with points along the arc
-function predict(start, vel, pts) {
+function predict(start, vel, pts, every = 4) {
   const p = start.clone(), v = vel.clone();
   const dt = 1 / 60;
   for (let i = 0; i < 900; i++) {
     v.y -= G * dt;
     p.addScaledVector(v, dt);
-    if (pts && i % 4 === 0) pts.push(p.clone());
+    if (pts && i % every === 0) pts.push(p.clone());
     const h = world.height(p.x, p.z);
     if (v.y < 0 && p.y <= Math.max(h, 0)) { p.y = Math.max(h, 0); return p; }
   }
   return p;
 }
-function maxRange(loft = 1) { return (VMAX * VMAX * Math.sin((2 * LOFTS[loft].deg * Math.PI) / 180)) / G; }
+function maxRange(loft = 1) { return (VMAX * VMAX * boost() * boost() * Math.sin((2 * LOFTS[loft].deg * Math.PI) / 180)) / G; }
 
 // power (0..1) whose first landing is `d` metres out along `yaw`
 function solvePower(from, yaw, deg, d) {
@@ -141,12 +151,29 @@ function updateAim() {
   aimMax = hdist(predict(start, launchVel(aimYaw, deg, 1)), cur.pos);
   aimDist = Math.min(Math.max(aimDist, 3), aimMax);
   aimPower = aimDist >= aimMax - 0.01 ? 1 : solvePower(cur.pos, aimYaw, deg, aimDist);
+  pathPts.length = 0;
+  aimLand.copy(predict(start, launchVel(aimYaw, deg, aimPower), pathPts, 1));
   arcPts.length = 0;
-  aimLand.copy(predict(start, launchVel(aimYaw, deg, aimPower), arcPts));
+  for (let i = 0; i < pathPts.length; i += 4) arcPts.push(pathPts[i]);
+  highlightPath();
   // longer shots make the power bar run faster
-  meterSpeed = lerp(0.55, 1.45, Math.min(1, aimDist / maxRange(1)));
+  meterSpeed = lerp(0.55, 1.45, Math.min(1.15, aimDist / (maxRange(1) / boost() / boost())));
   placeRig();
 }
+// light up every bubble the planned flight passes through
+const pathPts = [];
+function highlightPath() {
+  for (const b of world.bubbles) {
+    b.hl = false;
+    if (!b.alive) continue;
+    const r2 = (b.r + 0.55) ** 2;
+    for (const q of pathPts) {
+      const dx = q.x - b.pos.x, dy = q.y + 0.4 - b.pos.y, dz = q.z - b.pos.z;
+      if (dx * dx + dy * dy + dz * dz < r2) { b.hl = true; break; }
+    }
+  }
+}
+function clearHighlights() { if (world) for (const b of world.bubbles) b.hl = false; }
 function setAimPoint(pt) {
   if (hdist(pt, cur.pos) < 2) return;
   aimYaw = yawTo(cur.pos, pt);
@@ -196,6 +223,8 @@ function setControls(mode) {
   // mode: 'aim' | 'meter' | 'hidden' | 'watch'
   const bottom = $('bottom');
   bottom.dataset.mode = mode;
+  if (mode !== 'aim') $('bag').classList.add('hidden');
+  renderBag();
   $('loftBtn').textContent = LOFTS[cur ? cur.loft : 1].name;
   $('swingBtn').textContent = mode === 'meter' ? 'HIT!' : 'SWING';
   $('mapBtn').classList.toggle('on', mapMode);
@@ -203,7 +232,37 @@ function setControls(mode) {
 function setMeter(m) {
   $('meterFill').style.width = `${(m * 100).toFixed(1)}%`;
   $('meterWrap').classList.toggle('hot', m >= 0.97);
-  if (cur) $('meterRange').textContent = `TARGET ${aimDist.toFixed(0)}m`;
+  if (cur) $('meterRange').textContent = `TARGET ${aimDist.toFixed(0)}m${cur.equipped ? ' ' + ITEMS[cur.equipped].icon : ''}`;
+}
+
+// backpack
+function renderBag() {
+  if (!cur || !cur.bag) return;
+  $('bagBtn').textContent = cur.equipped ? ITEMS[cur.equipped].icon : '🎒';
+  $('bagBtn').classList.toggle('on', !!cur.equipped);
+  $('bag').innerHTML = '<p>Pick one item for this shot</p>' + ITEM_KEYS.map(k => `
+    <button class="item${cur.equipped === k ? ' on' : ''}" data-k="${k}" ${cur.bag[k] ? '' : 'disabled'}>
+      <span>${ITEMS[k].icon}</span><b>${ITEMS[k].name}</b><small>${ITEMS[k].desc}</small><em>×${cur.bag[k]}</em>
+    </button>`).join('');
+}
+$('bagBtn').addEventListener('click', () => {
+  if (phase !== 'aim' || cur.cpu) return;
+  renderBag();
+  $('bag').classList.toggle('hidden');
+});
+$('bag').addEventListener('click', (e) => {
+  const b = e.target.closest('.item');
+  if (!b || b.disabled || phase !== 'aim') return;
+  const k = b.dataset.k;
+  cur.equipped = cur.equipped === k ? null : k;
+  updateAim();
+  renderBag();
+  $('bag').classList.add('hidden');
+});
+function giveItem(p) {
+  const k = ITEM_KEYS[Math.floor(Math.random() * ITEM_KEYS.length)];
+  p.bag[k]++;
+  return k;
 }
 
 // elephant countdown
@@ -245,6 +304,7 @@ function startGame() {
   players = setup.slots.map((s, i) => s === 'off' ? null : {
     def: PLAYER_DEFS[i], cpu: s === 'cpu', total: 0, holes: [], loft: 1,
     frog: M.makeFrog(PLAYER_DEFS[i].color), shadow: M.makeShadow(), pos: new THREE.Vector3(), strokes: 0, holed: false, holePts: 0,
+    bag: { goggles: 1, spring: 1, sticky: 1, boots: 1 }, equipped: null,
   }).filter(Boolean);
   players.forEach(p => scene.add(p.frog.group, p.shadow));
   holeList = HOLES.slice(0, setup.holes);
@@ -297,6 +357,7 @@ function nextTurn() {
 
 function beginAim() {
   mapMode = false;
+  cur.equipped = null;
   golfer.setColor(cur.def.color);
   golfer.setSwing(-0.6);
   launcher.setTilt(0.3);
@@ -329,8 +390,11 @@ function placeRig() {
 // The CPU weighs every gimmick in reach against heading home: early on it hunts combos,
 // and the more strokes it has taken the more it wants the cup.
 function planCpu(p) {
-  const R = maxRange() * 0.95;
+  const has = (k) => p.bag[k] > 0;
   const remaining = hdist(p.pos, world.cup);
+  // a long way from home: sometimes fire up the rocket
+  if (has('spring') && remaining > maxRange() * 0.95 && Math.random() < 0.4) p.equipped = 'spring';
+  const R = maxRange() * 0.95;
   const urgency = 1 + p.strokes * 1.2;
   const opts = [];
   const add = (pt, value, kind, loft = 1) => {
@@ -354,6 +418,9 @@ function planCpu(p) {
   for (const b of world.belts) add(b.p1.clone().addScaledVector(b.dir, 3).setY(b.top), 320, 'belt', 2);
   for (const [mx, mz] of world.mountains) add(new THREE.Vector3(mx, world.height(mx, mz), mz), 600, 'mountain', 2);
   for (const f of world.flies) if (f.alive) add(f.center.clone(), 160, 'flies');
+  for (const m of world.mysteries) if (!m.used) add(new THREE.Vector3(m.x, m.y, m.z), 300, 'mystery', 2);
+  for (const pd of world.pads) add(new THREE.Vector3(pd.x, 0, pd.z), 260, 'pad', 2);
+  for (const pt of world.portals) add(new THREE.Vector3(pt.x, pt.y, pt.z), 200, 'portal', 2);
   opts.sort((a, b) => b.score - a.score);
   const pick = opts[0] || { pt: autoTarget(p.pos), kind: 'line', loft: 1 };
   const target = pick.pt;
@@ -362,7 +429,12 @@ function planCpu(p) {
   const yaw = yawTo(p.pos, target) + (Math.random() - 0.5) * 0.05;
   // put the target short of the cup by roughly how far the frog will bounce and hop on
   let d = dist;
-  if (pick.kind === 'cup') {
+  if (!p.equipped) {
+    if ((pick.kind === 'cup' || pick.kind === 'mystery' || pick.kind === 'pad') && dist > 25 && has('sticky')) p.equipped = 'sticky';
+    else if (pick.kind === 'flies' && has('goggles')) p.equipped = 'goggles';
+    else if (pick.kind === 'line' && has('boots') && Math.random() < 0.3) p.equipped = 'boots';
+  }
+  if (pick.kind === 'cup' && p.equipped !== 'sticky') {
     const v = launchVel(yaw, LOFTS[loft].deg, solvePower(p.pos, yaw, LOFTS[loft].deg, dist));
     d = Math.max(3, dist - Math.hypot(v.x, v.z) * 0.2);
   }
@@ -386,6 +458,10 @@ function swing() {
   else popup('Short…', where, 'note');
   // carry scales ~linearly with (0.05 + 0.95p), so scale that to land at m × the target distance
   power = Math.max(0, (m * (0.05 + 0.95 * aimPower) - 0.05) / 0.95);
+  if (cur.equipped) {
+    cur.bag[cur.equipped]--;
+    popup(`${ITEMS[cur.equipped].icon} ${ITEMS[cur.equipped].name}!`, seatPos(cur.pos, aimYaw).add(tmp.set(0, 3.4, 0)), 'gold');
+  }
   phase = 'swing'; phaseT = 0; swingFired = false;
   rangeRing.visible = false;
   cur.strokes++;
@@ -398,8 +474,10 @@ function fire() {
   shot = {
     p: cur, pos: start, vel: v, state: 'fly', t: 0, rest: cur.pos.clone(),
     hopsLeft: 0, bounces: 0, contacted: false, hopping: false, hopIn: false,
-    mult: 1, chain: 0, points: 0, used: new Set(), lastDir: dirOf(aimYaw), timer: 0,
+    mult: 1, chain: 0, points: 0, used: new Set(), lastDir: dirOf(aimYaw), timer: 0, item: cur.equipped,
   };
+  cur.equipped = null;
+  clearHighlights();
   chaseDir.copy(dirOf(aimYaw));
   launcher.setTilt(-0.35);
   sfx.thwack(); sfx.croak();
@@ -415,7 +493,7 @@ function award(base, label, pos, cls = '', chain = true) {
   if (base < 0) {
     pts = base;
   } else {
-    if (chain) { s.chain++; f = Math.min(3, 1 + 0.5 * (s.chain - 1)); }
+    if (chain) { s.chain++; f = Math.min(2, 1 + 0.25 * (s.chain - 1)); }
     pts = Math.round((base * f * s.mult) / 10) * 10;
   }
   s.points += pts; cur.total += pts; cur.holePts += pts;
@@ -436,6 +514,8 @@ function stepShot(dt) {
     case 'snake': snakeStep(dt); break;
     case 'swim': swimStep(dt); break;
     case 'slide': slideStep(dt); break;
+    case 'pad': padStep(dt); break;
+    case 'portal': portalStep(dt); break;
     case 'sink':
       s.timer -= dt;
       s.pos.lerp(tmp.copy(world.cup).add(tmp2.set(0, -0.9, 0)), Math.min(1, dt * 6));
@@ -469,7 +549,7 @@ function checkPickups(cx, cy, cz) {
     if (dx * dx + dy * dy + dz * dz < 1.8) {
       f.alive = false; world.group.remove(f.model.group);
       sfx.coin();
-      award(60, s.chain >= 2 ? 'FLY FEAST!' : '', f.pos, 'gold');
+      award(30, s.chain >= 3 ? 'FLY FEAST!' : '', f.pos, 'gold');
       popup('Gulp!', tmp.copy(f.pos).add(tmp2.set(0, 1.2, 0)), 'note');
     }
   }
@@ -491,15 +571,16 @@ function webBounce(w) {
   let sp = hv.length();
   if (sp < 0.5) hv.copy(s.lastDir);
   hv.normalize();
-  sp = Math.max(sp * 1.1, 7);
-  v.set(hv.x * sp, Math.max(-v.y * 0.85, 14), hv.z * sp);
+  // big webs fling you much farther
+  sp = w.big ? Math.max(sp * 1.3, 13) : Math.max(sp * 1.1, 7);
+  v.set(hv.x * sp, Math.max(-v.y * 0.85, w.big ? 20 : 14), hv.z * sp);
   s.lastDir.copy(hv);
   s.mult *= 2;
   w.wobble = 1;
   s.state = 'fly'; s.hopping = false; s.bounces = 0; s.contacted = false;
   sfx.boing();
   world.burst(tmp2.set(p.x, w.y, p.z), 0xffffff, 6);
-  award(150, `WEB BOUNCE! ×${s.mult}`, p, 'web');
+  award(50, `${w.big ? 'BIG ' : ''}WEB BOUNCE! ×${s.mult}`, p, 'web');
 }
 
 // launch the frog from `from` so it comes down exactly on `target`
@@ -533,6 +614,7 @@ function flyStep(dt) {
   p.addScaledVector(v, dt);
   const cx = p.x, cy = p.y + 0.4, cz = p.z;
   checkPickups(cx, cy, cz);
+  if (v.y < 0 && checkPortal()) return;
   for (const w of world.webs) {
     if (s.used.has(w) || !(prevY > w.y && p.y <= w.y && v.y < 0)) continue;
     if (inWeb(w, p.x, p.z)) { webBounce(w); return; }
@@ -545,7 +627,7 @@ function flyStep(dt) {
       s.state = 'belt'; s.belt = b; s.along = along; s.side = side * 0.6; s.tick = 0;
       p.y = b.top;
       sfx.belt();
-      if (!s.used.has(b)) { s.used.add(b); award(100, 'CONVEYOR RIDE!', p, 'belt'); }
+      if (!s.used.has(b)) { s.used.add(b); award(50, 'CONVEYOR RIDE!', p, 'belt'); }
       return;
     }
   }
@@ -590,7 +672,7 @@ function flyStep(dt) {
       s.used.add(o);
       v.x *= -0.4; v.z *= -0.4; v.y = Math.abs(v.y) * 0.4 + 3;
       sfx.bonk();
-      award(150, 'FROG BONK!', p);
+      award(100, 'FROG BONK!', p);
     }
   }
   const hd = Math.hypot(p.x - world.cup.x, p.z - world.cup.z);
@@ -605,8 +687,11 @@ function flyStep(dt) {
 
 function land(h) {
   const s = shot, p = s.pos, v = s.vel;
+  checkMystery();
+  if (checkPortal()) return;
   for (const w of world.webs) if (!s.used.has(w) && inWeb(w, p.x, p.z, 0.5)) return webBounce(w);
   const surf = world.surface(p.x, p.z, h);
+  if (surf === 'pond' || surf === 'sea') { const pad = padAt(p); if (pad) return startPad(pad); }
   if (surf === 'sea') {
     s.state = 'oob'; s.timer = 1.4;
     sfx.splash();
@@ -615,7 +700,9 @@ function land(h) {
     return;
   }
   if (surf === 'pond') return startSwim();
-  if (!s.contacted) { s.contacted = true; s.hopsLeft = HOP_COUNT[surf] ?? 1; }
+  if (!s.contacted) { s.contacted = true; s.hopsLeft = (HOP_COUNT[surf] ?? 1) + (s.item === 'boots' ? 3 : 0); }
+  // Sticky Feet: no bouncing, no hopping, stop right here
+  if (s.item === 'sticky' && surf !== 'green') { p.y = h; v.set(0, 0, 0); popup('Stuck!', p, 'note'); return restHere(); }
   if (surf === 'sand') { sfx.thud(); popup('Sand!', p, 'note'); return restHere(); }
   const n = world.normal(p.x, p.z);
   const vn = v.dot(n);
@@ -647,8 +734,8 @@ function land(h) {
     }
     dir.normalize();
     s.lastDir.copy(dir);
-    const hs = (HOP_SPEED[surf] || 2.4) * (0.45 + 0.55 * (s.hopsLeft / 3));
-    v.set(dir.x * hs, HOP_VY, dir.z * hs);
+    const hs = (HOP_SPEED[surf] || 2.4) * (0.45 + 0.55 * Math.min(1, s.hopsLeft / 3)) * (s.item === 'boots' ? 1.8 : 1);
+    v.set(dir.x * hs, HOP_VY * (s.item === 'boots' ? 1.3 : 1), dir.z * hs);
     s.hopsLeft--;
     p.y = h + 0.02;
     sfx.hop();
@@ -674,6 +761,8 @@ function restHere() {
     sfx.hop();
     return;
   }
+  checkMystery();
+  if (checkPortal()) return;
   if ((s.slides || 0) < 3 && surf !== 'green' && world.normal(p.x, p.z).y < 0.86) return startSlide();
   for (const w of world.webs) {
     if (!s.used.has(w) && inWeb(w, p.x, p.z, 2.5)) {
@@ -683,8 +772,93 @@ function restHere() {
   }
   for (const sn of world.snakes) if (!s.used.has(sn) && Math.hypot(p.x - sn.x, p.z - sn.z) < SNAKE_R) return startSnake(sn);
   for (const el of world.elephants) if (!s.used.has(el) && hdist(p, el.pos) < ELEPHANT_R) return startElephant(el);
-  if (leapForFly()) return;
+  if (s.item !== 'sticky' && leapForFly()) return;
   finish();
+}
+
+// ---------- lily pads: spin round with the frog on board, then fling it somewhere new ----------
+function padAt(p) {
+  for (const pd of world.pads) if (!shot.used.has(pd) && Math.hypot(p.x - pd.x, p.z - pd.z) < pd.r + 0.4) return pd;
+  return null;
+}
+function startPad(pd) {
+  const s = shot;
+  s.used.add(pd);
+  s.state = 'pad'; s.pad = pd; s.et = 0;
+  s.pos.set(pd.x, 0.3, pd.z);
+  sfx.hop();
+  award(50, 'LILY PAD SPIN!', s.pos, 'belt');
+}
+function padStep(dt) {
+  const s = shot, pd = s.pad;
+  s.et += dt;
+  pd.spin = 1;
+  s.pos.set(pd.x, 0.3, pd.z);
+  const a = s.et * 9;
+  s.lastDir.set(Math.sin(a), 0, Math.cos(a));
+  if (s.et > 1.3) {
+    launchTo(s.pos.clone(), randomLanding(s.pos, 20, 42), 48);
+    sfx.boing();
+  }
+}
+
+// ---------- whirlpool portals: spin down one, pop up out of its partner ----------
+function checkPortal() {
+  const s = shot, p = s.pos;
+  for (const pt of world.portals) {
+    if (s.used.has(pt) || Math.hypot(p.x - pt.x, p.z - pt.z) > 2.6 || p.y - pt.y > 1.4) continue;
+    s.used.add(pt); s.used.add(pt.to);
+    s.state = 'portal'; s.portal = pt; s.et = 0; s.warped = false;
+    sfx.splash();
+    award(50, 'WHIRLPOOL WARP!', p, 'web');
+    return true;
+  }
+  return false;
+}
+function portalStep(dt) {
+  const s = shot, pt = s.portal, frog = cur.frog.group;
+  s.et += dt;
+  const a = s.et * 14;
+  s.lastDir.set(Math.sin(a), 0, Math.cos(a));
+  if (!s.warped) {
+    s.pos.x += (pt.x - s.pos.x) * Math.min(1, dt * 8);
+    s.pos.z += (pt.z - s.pos.z) * Math.min(1, dt * 8);
+    s.pos.y = pt.y - s.et * 0.8;
+    frog.scale.setScalar(Math.max(0.05, 1 - s.et / 0.6));
+    if (s.et >= 0.6) {
+      const out = pt.to;
+      s.pos.set(out.x, out.y - 0.4, out.z);
+      s.warped = true;
+      camPos.set(out.x + 9, out.y + 7, out.z + 9);   // jump the camera with the frog
+      sfx.splash();
+    }
+  } else {
+    frog.scale.setScalar(Math.min(1, (s.et - 0.6) / 0.3));
+    if (s.et >= 0.9) {
+      frog.scale.setScalar(1);
+      const yaw = Math.random() * Math.PI * 2;
+      s.vel.set(Math.sin(yaw) * 5, 10, Math.cos(yaw) * 5);
+      s.lastDir.copy(dirOf(yaw));
+      s.pos.y = s.portal.to.y + 0.3;
+      s.state = 'fly'; s.hopping = false; s.bounces = 0; s.contacted = false;
+      sfx.boing();
+    }
+  }
+}
+
+// ---------- "?" circles: land on one for a random backpack item ----------
+function checkMystery() {
+  const s = shot, p = s.pos;
+  for (const m of world.mysteries) {
+    if (m.used || Math.hypot(p.x - m.x, p.z - m.z) > 3 || p.y - m.y > 1.5) continue;
+    m.used = true; m.t = 0;
+    m.model.glow.material.opacity = 1;
+    m.model.bMat.emissive.set(0xffe14d);
+    const k = giveItem(cur);
+    sfx.coin(); sfx.ding();
+    award(50, `${ITEMS[k].icon} ${ITEMS[k].name}!`, p, 'gold');
+    popup('Into the backpack!', tmp.copy(p).add(tmp2.set(0, 2, 0)), 'note');
+  }
 }
 
 // After landing, a hungry frog leaps at the nearest fly in reach, flies through it and keeps
@@ -692,7 +866,7 @@ function restHere() {
 const FLY_REACH = 15;
 function leapForFly() {
   const s = shot, p = s.pos;
-  let best = null, bd = FLY_REACH;
+  let best = null, bd = s.item === 'goggles' ? FLY_REACH * 2 : FLY_REACH;
   for (const f of world.flies) {
     if (!f.alive || s.used.has(f)) continue;
     const d = hdist(p, f.pos);
@@ -731,7 +905,7 @@ function beltStep(dt) {
   s.lastDir.copy(b.dir);
   s.vel.set(b.dir.x * 7, 0, b.dir.z * 7);
   checkPickups(s.pos.x, s.pos.y + 0.4, s.pos.z);
-  perSecond(dt, 30);
+  perSecond(dt, 10);
   if (s.along > b.len) {
     s.state = 'fly';
     s.vel.set(b.dir.x * 7, 3, b.dir.z * 7);
@@ -765,6 +939,8 @@ function slideStep(dt) {
   if (v.lengthSq() > 0.25) s.lastDir.set(v.x, 0, v.z).normalize();
   s.vel.set(v.x, 0, v.z);
   checkPickups(p.x, p.y + 0.4, p.z);
+  checkMystery();
+  if (checkPortal()) return;
   if ((Math.hypot(n.x, n.z) < 0.2 && v.length() < 2) || s.slideT > 8) restHere();
 }
 
@@ -783,7 +959,7 @@ function startSnake(sn) {
   s.throwTarget = web ? new THREE.Vector3(web.x, web.y, web.z) : randomLanding(new THREE.Vector3(sn.x, sn.y, sn.z), 18, 40);
   sn.faceYaw = Math.atan2(s.throwTarget.x - sn.x, s.throwTarget.z - sn.z);
   sfx.trumpet();
-  award(200, 'SNAKE SNATCH!', s.pos, 'gold');
+  award(100, 'SNAKE SNATCH!', s.pos, 'gold');
 }
 function snakeStep(dt) {
   const s = shot, sn = s.snake;
@@ -808,7 +984,7 @@ function startElephant(el) {
   s.state = 'elephant'; s.el = el; s.et = 0; s.pressT = null; s.lastCount = '';
   el.grabT = 0; el.faceYaw = null;
   sfx.trumpet();
-  award(150, 'ELEPHANT!', s.pos, 'gold');
+  award(100, 'ELEPHANT!', s.pos, 'gold');
   s.cpuPress = GO_T + (Math.random() + Math.random() + Math.random() - 1.5) * 0.3;
 }
 function elephantStep(dt) {
@@ -835,11 +1011,11 @@ function elephantStep(dt) {
   showCountdown('');
   const err = s.pressT === null ? 9 : Math.abs(s.pressT - GO_T);
   const early = s.pressT !== null && s.pressT < GO_T;
-  if (err < 0.06) award(600, 'PERFECT TIMING!', s.pos, 'gold');
-  else if (err < 0.15) award(400, 'GREAT TIMING!', s.pos, 'gold');
-  else if (err < 0.3) award(200, 'GOOD TIMING', s.pos, 'belt');
-  else if (err < 0.45) award(50, 'OK…', s.pos, 'note');
-  else award(-200, s.pressT === null ? 'TOO SLOW!' : early ? 'TOO EARLY!' : 'TOO LATE!', s.pos);
+  if (err < 0.06) award(300, 'PERFECT TIMING!', s.pos, 'gold');
+  else if (err < 0.15) award(200, 'GREAT TIMING!', s.pos, 'gold');
+  else if (err < 0.3) award(100, 'GOOD TIMING', s.pos, 'belt');
+  else if (err < 0.45) award(30, 'OK…', s.pos, 'note');
+  else award(-100, s.pressT === null ? 'TOO SLOW!' : early ? 'TOO EARLY!' : 'TOO LATE!', s.pos);
   el.rearTarget = 0; el.grabT = -1;
   // half the time it's a great throw at the hole, half the time it goes anywhere
   const from = s.pos.clone();
@@ -859,7 +1035,7 @@ function elephantStep(dt) {
   sfx.boing();
 }
 
-// ---------- water: swim with the current, grab bubbles, then climb out ----------
+// ---------- water: swim straight on (or ride the stream), then climb out ----------
 function findShore(at) {
   for (let r = 1; r < 45; r += 1) {
     for (let a = 0; a < Math.PI * 2; a += Math.PI / 12) {
@@ -875,31 +1051,33 @@ function startSwim() {
   const s = shot, p = s.pos;
   const route = [];
   let at = { x: p.x, z: p.z };
+  const dir = new THREE.Vector3(s.vel.x, 0, s.vel.z);
+  if (dir.lengthSq() < 0.25) dir.copy(s.lastDir);
   const st = world.streamAt(p.x, p.z);
   if (st) {
-    // ride the current down to the end of the stream
-    for (let i = st.seg + 1; i < st.stream.pts.length; i++) route.push({ ...st.stream.pts[i], speed: 9 });
-    at = st.stream.pts[st.stream.pts.length - 1];
+    // ride the current down to the end of the stream, then keep going the way it flows
+    const pts = st.stream.pts;
+    for (let i = st.seg + 1; i < pts.length; i++) route.push({ ...pts[i], speed: 9 });
+    const a = pts[pts.length - 2], b = pts[pts.length - 1];
+    dir.set(b.x - a.x, 0, b.z - a.z);
+    at = b;
   }
-  // paddle over to the closest water bubbles
-  const taken = new Set();
-  for (let k = 0; k < 4; k++) {
-    let best = null, bd = 14;
-    for (const b of world.bubbles) {
-      if (!b.alive || !b.water || taken.has(b)) continue;
-      const d = Math.hypot(b.base.x - at.x, b.base.z - at.z);
-      if (d < bd) { best = b; bd = d; }
+  dir.normalize();
+  // no turning round: paddle straight ahead until the bank
+  let exit = null;
+  for (let t = 1; t < 90; t += 0.5) {
+    const x = at.x + dir.x * t, z = at.z + dir.z * t, h = world.height(x, z);
+    if (h > 0.3) {
+      const sf = world.surface(x, z, h);
+      if (sf !== 'sea' && sf !== 'pond') { exit = { x: at.x + dir.x * (t + 1), z: at.z + dir.z * (t + 1) }; break; }
     }
-    if (!best) break;
-    taken.add(best);
-    route.push({ x: best.base.x, z: best.base.z, speed: 5.5 });
-    at = { x: best.base.x, z: best.base.z };
+    if (h < 0.02 && !world.inLake(x, z)) break;          // open sea ahead: head for the nearest bank instead
   }
-  route.push({ ...findShore(at), speed: 5.5, shore: true });
+  route.push({ ...(exit || findShore(at)), speed: 4.5, shore: true });
   s.state = 'swim'; s.route = route; s.tick = 0; s.swimT = 0;
   sfx.splash();
   world.burst(tmp.set(p.x, 0.3, p.z), 0xffffff, 4);
-  if (!s.used.has('swim')) { s.used.add('swim'); award(100, st ? 'RIDE THE STREAM!' : 'SPLASH! SWIM!', p, 'belt'); }
+  if (!s.used.has('swim')) { s.used.add('swim'); award(30, st ? 'RIDE THE STREAM!' : 'SPLASH! SWIM!', p, 'belt'); }
 }
 function swimStep(dt) {
   const s = shot, p = s.pos;
@@ -920,7 +1098,10 @@ function swimStep(dt) {
   const h = world.height(p.x, p.z);
   p.y = h > 0 ? h : -0.2 + Math.sin(s.swimT * 10) * 0.05;
   checkPickups(p.x, 0.3, p.z);
-  perSecond(dt, 50);
+  const pad = padAt(p);
+  if (pad) return startPad(pad);
+  if (checkPortal()) return;
+  perSecond(dt, 10);
 }
 
 function holeOut() {
@@ -931,7 +1112,7 @@ function holeOut() {
   sfx.ding();
   award(bonus, label, world.cup, 'big', false);
   if (!firstIn && players.length > 1) {
-    award(300, '', tmp.copy(world.cup).add(tmp2.set(0, 2, 0)), 'gold', false);
+    award(200, '', tmp.copy(world.cup).add(tmp2.set(0, 2, 0)), 'gold', false);
     popup('First in!', tmp.copy(world.cup).add(tmp2.set(0, 3.5, 0)), 'note');
   }
   firstIn = true;
@@ -944,6 +1125,7 @@ function finish(holed = false) {
   for (const f of world.flies) f.targeted = false;
   for (const el of world.elephants) { el.grabT = -1; el.rearTarget = 0; }
   for (const sn of world.snakes) sn.grab = false;
+  if (cur.frog.group.visible) cur.frog.group.scale.setScalar(1);
   setPressButton(false); showCountdown('');
   s.state = 'done';
   if (!holed) {
@@ -1159,7 +1341,7 @@ function tick(dt) {
   } else if (phase === 'aim') {
     aimCamera();
     showAim();
-    $('meterRange').textContent = `TARGET ${aimDist.toFixed(0)}m`;
+    $('meterRange').textContent = `TARGET ${aimDist.toFixed(0)}m${cur.equipped ? ' ' + ITEMS[cur.equipped].icon : ''}`;
   } else if (phase === 'cpu') {
     let d = cpuPlan.yaw - aimYaw;
     d = Math.atan2(Math.sin(d), Math.cos(d));

@@ -31,7 +31,6 @@ function polyInfo(pts, x, z) {
   return { d: Math.sqrt(best), s, seg, total: acc };
 }
 
-const BUBBLE_VALUES = [10, 10, 20, 20, 30, 30, 50, 50, 100];
 const COLORS = {
   fairway: [0x74d63f, 0x6acb38], green: 0x93e85a, rough: 0x3f9e2e, sand: 0xf0dfa4,
   beach: 0xf3e3ae, shallow: 0xd8cf98, deep: 0x1f7a8a, rock: 0xa08d68, snow: 0xf4f1e4,
@@ -70,6 +69,9 @@ export class World {
     this.buildCup();
     this.buildWebs();
     this.buildBelts();
+    this.buildPads();
+    this.buildPortals();
+    this.buildMysteries();
     this.buildElephants();
     this.buildSnakes();
     this.buildTrees();
@@ -174,6 +176,8 @@ export class World {
       ...(this.hole.elephants || []).flatMap(([a, b, c, d]) => [[a, b, 10], [c, d, 10]]),
       ...this.snakes.map(s => [s.x, s.z, 8]),
       ...this.mountains.map(([x, z, r]) => [x, z, r + 2]),
+      ...this.portals.map(p => [p.x, p.z, 6]),
+      ...this.mysteries.map(m => [m.x, m.z, 6]),
     ];
   }
 
@@ -232,9 +236,10 @@ export class World {
     this.group.add(tee);
   }
 
-  addWeb(x, z, a) {
-    const m = M.makeWeb();
-    const half = M.WEB_SIZE / 2;
+  addWeb(x, z, a, big = false) {
+    const size = big ? M.WEB_SIZE * 2 : M.WEB_SIZE;
+    const m = M.makeWeb(size);
+    const half = size / 2;
     // sit the web just above the highest ground under it
     let g = -Infinity;
     for (const [u, v] of [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1], [0, 1], [1, 0], [0, -1], [-1, 0]]) {
@@ -245,11 +250,11 @@ export class World {
     m.group.position.set(x, g, z);
     m.group.rotation.y = a;
     this.group.add(m.group);
-    this.webs.push({ x, z, a, y: g + M.WEB_Y, half, model: m, wobble: 0, phase: this.rand() * 6 });
+    this.webs.push({ x, z, a, y: g + M.WEB_Y, half, big, model: m, wobble: 0, phase: this.rand() * 6 });
   }
   buildWebs() {
     this.webs = [];
-    for (const [x, z, a] of this.hole.webs || []) this.addWeb(x, z, a);
+    for (const [x, z, a, big] of this.hole.webs || []) this.addWeb(x, z, a, !!big);
   }
 
   buildBelts() {
@@ -277,6 +282,55 @@ export class World {
       this.group.add(m.group);
       if (web) this.addWeb(x2 + dir.x * 5, z2 + dir.z * 5, Math.atan2(dir.x, dir.z));
       return { p1, p2, dir, perp, len, w, top, model: m };
+    });
+  }
+
+  // lily pads float on every lake
+  buildPads() {
+    this.pads = [];
+    for (const [px, pz, rx, rz] of this.ponds) {
+      const n = Math.max(1, Math.min(4, Math.round((rx * rz) / 45)));
+      for (let i = 0; i < n; i++) {
+        let x, z, ok = false;
+        for (let t = 0; t < 30 && !ok; t++) {
+          const a = this.rand() * 6.28, r = 0.2 + this.rand() * 0.45;
+          x = px + Math.cos(a) * rx * r; z = pz + Math.sin(a) * rz * r;
+          ok = this.height(x, z) < -0.6 && this.pads.every(p => Math.hypot(p.x - x, p.z - z) > 6);
+        }
+        if (!ok) continue;
+        const m = M.makeLilyPad();
+        m.group.position.set(x, 0.08, z);
+        m.group.rotation.y = this.rand() * 6.28;
+        this.group.add(m.group);
+        this.pads.push({ x, z, r: 2.6, model: m, spin: 0, bob: this.rand() * 6 });
+      }
+    }
+  }
+
+  // whirlpool portals come in pairs: go in one, come out the other
+  buildPortals() {
+    const colors = [0x7c5cff, 0x00d0ff, 0xff6fd8, 0x4dff9a];
+    this.portals = [];
+    (this.hole.portals || []).forEach(([x1, z1, x2, z2], i) => {
+      const a = { x: x1, z: z1 }, b = { x: x2, z: z2 };
+      for (const p of [a, b]) {
+        p.y = Math.max(0, this.height(p.x, p.z));
+        p.model = M.makePortal(colors[i % colors.length]);
+        p.model.group.position.set(p.x, p.y, p.z);
+        this.group.add(p.model.group);
+        this.portals.push(p);
+      }
+      a.to = b; b.to = a;
+    });
+  }
+
+  buildMysteries() {
+    this.mysteries = (this.hole.mystery || []).map(([x, z]) => {
+      const m = M.makeMystery();
+      const y = Math.max(0, this.height(x, z));
+      m.group.position.set(x, y, z);
+      this.group.add(m.group);
+      return { x, z, y, model: m, used: false, t: 0, phase: this.rand() * 6 };
     });
   }
 
@@ -385,7 +439,8 @@ export class World {
   }
   buildBubbles() {
     this.bubbles = [];
-    const pick = () => BUBBLE_VALUES[Math.floor(this.rand() * BUBBLE_VALUES.length)];
+    // the higher a bubble floats, the harder it is to hit and the more it's worth
+    const byAlt = (alt) => alt > 21.5 ? 300 : alt > 17 ? 100 : alt > 12 ? 50 : alt > 7.5 ? 30 : this.rand() < 0.5 ? 10 : 20;
     // scattered over the open ground
     const area = (this.maxX - this.minX) * (this.maxZ - this.minZ);
     const n = Math.round(area / 480);
@@ -394,7 +449,8 @@ export class World {
       const x = lerp(this.minX, this.maxX, this.rand()), z = lerp(this.minZ, this.maxZ, this.rand());
       const h = this.height(x, z);
       if (h < 0.3 || this.landSD(x, z) > -6) continue;
-      this.addBubble(x, h + 3 + this.rand() * 12, z, pick());
+      const alt = 3 + Math.pow(this.rand(), 1.8) * 20;
+      this.addBubble(x, h + alt, z, byAlt(alt));
       made++;
     }
     // big high rainbow bubbles
@@ -416,26 +472,26 @@ export class World {
       const k = Math.max(2, Math.round((rx * rz) / 35));
       for (let i = 0; i < k; i++) {
         const a = this.rand() * 6.28, r = Math.sqrt(this.rand()) * 0.7;
-        this.addBubble(px + Math.cos(a) * rx * r, 0.55, pz + Math.sin(a) * rz * r, this.rand() < 0.3 ? 100 : 50, true);
+        this.addBubble(px + Math.cos(a) * rx * r, 0.55, pz + Math.sin(a) * rz * r, this.rand() < 0.3 ? 30 : 20, true);
       }
     }
     for (const st of this.streams) {
       for (let s = 6; s < st.total - 3; s += 7) {
         const p = this.streamPoint(st, s);
-        this.addBubble(p.x, 0.55, p.z, this.rand() < 0.25 ? 100 : 30, true);
+        this.addBubble(p.x, 0.55, p.z, this.rand() < 0.25 ? 30 : 20, true);
       }
     }
     for (const [mx, mz, r1, r2] of this.moats) {
       for (let i = 0; i < 6; i++) {
         const a = (i / 6) * Math.PI * 2 + 0.3, r = (r1 + r2) / 2;
-        this.addBubble(mx + Math.cos(a) * r, 0.55, mz + Math.sin(a) * r, i % 3 ? 50 : 100, true);
+        this.addBubble(mx + Math.cos(a) * r, 0.55, mz + Math.sin(a) * r, i % 3 ? 20 : 30, true);
       }
     }
-    for (const w of this.webs) this.addBubble(w.x, w.y + 9, w.z, 100);
+    for (const w of this.webs) this.addBubble(w.x, w.y + (w.big ? 16 : 9), w.z, w.big ? 300 : 50);
     for (const b of this.belts) {
       for (let d = 4; d < b.len - 2; d += 6) {
         const q = b.p1.clone().addScaledVector(b.dir, d);
-        this.addBubble(q.x, b.top + 1.1, q.z, 30);
+        this.addBubble(q.x, b.top + 1.1, q.z, 20);
       }
     }
   }
@@ -494,6 +550,9 @@ export class World {
       if (!b.alive) continue;
       b.pos.set(b.base.x, b.base.y + Math.sin(time * 1.4 + b.phase) * (b.water ? 0.12 : 0.35), b.base.z);
       b.model.group.position.copy(b.pos);
+      b.model.halo.visible = !!b.hl;
+      if (b.hl) b.model.halo.material.opacity = 0.55 + Math.sin(time * 8) * 0.3;
+      b.model.group.scale.setScalar(b.hl ? 1.12 + Math.sin(time * 8) * 0.06 : 1);
     }
     for (const f of this.flies) {
       if (!f.alive) continue;
@@ -531,6 +590,26 @@ export class World {
       m.tongue.visible = Math.sin(time * 6 + sn.phase) > 0.3;
     }
     for (const b of this.belts) b.model.tex.offset.y -= dt * 7 / b.w;
+    for (const p of this.pads) {
+      p.spin = Math.max(0, p.spin - dt * 2);
+      p.model.group.rotation.y += dt * (0.15 + p.spin * 9);
+      p.model.group.position.y = 0.08 + Math.sin(time * 1.3 + p.bob) * 0.04;
+    }
+    for (const p of this.portals) p.model.disc.rotation.z -= dt * 3;
+    for (const m of this.mysteries) {
+      const mm = m.model;
+      if (m.used) {
+        m.t += dt;
+        mm.glow.material.opacity = Math.max(0, 1 - m.t * 0.8);
+        mm.balloon.position.y = 5 + m.t * 6;
+        mm.string.visible = false;
+        mm.group.children[0].material.opacity = Math.max(0, 1 - m.t);
+        if (m.t > 2) mm.group.visible = false;
+      } else {
+        mm.balloon.position.y = 5 + Math.sin(time * 1.5 + m.phase) * 0.3;
+        mm.balloon.rotation.y = Math.sin(time * 0.8 + m.phase) * 0.4;
+      }
+    }
     for (const el of this.elephants) this.placeElephant(el, dt);
     for (let i = this.bursts.length - 1; i >= 0; i--) {
       const u = this.bursts[i];
