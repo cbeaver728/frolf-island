@@ -549,7 +549,7 @@ function checkPickups(cx, cy, cz) {
     if (dx * dx + dy * dy + dz * dz < 1.8) {
       f.alive = false; world.group.remove(f.model.group);
       sfx.coin();
-      award(30, s.chain >= 3 ? 'FLY FEAST!' : '', f.pos, 'gold');
+      award(20, s.chain >= 3 ? 'FLY FEAST!' : '', f.pos, 'gold');
       popup('Gulp!', tmp.copy(f.pos).add(tmp2.set(0, 1.2, 0)), 'note');
     }
   }
@@ -575,7 +575,7 @@ function webBounce(w) {
   sp = w.big ? Math.max(sp * 1.3, 13) : Math.max(sp * 1.1, 7);
   v.set(hv.x * sp, Math.max(-v.y * 0.85, w.big ? 20 : 14), hv.z * sp);
   s.lastDir.copy(hv);
-  s.mult *= 2;
+  s.mult = Math.min(4, s.mult * 2);      // webs stack, but only up to x4
   w.wobble = 1;
   s.state = 'fly'; s.hopping = false; s.bounces = 0; s.contacted = false;
   sfx.boing();

@@ -509,14 +509,14 @@ export class World {
     // little swarms around the arena so a landing frog can chain them
     this.flies = [];
     const avoid = this.gimmickSpots();
-    const swarms = Math.max(4, Math.round((this.maxX - this.minX) * (this.maxZ - this.minZ) / 5500));
+    const swarms = Math.max(6, Math.round((this.maxX - this.minX) * (this.maxZ - this.minZ) / 4000));
     let tries = 0, made = 0;
     while (made < swarms && tries++ < 400) {
       const sx = lerp(this.minX, this.maxX, this.rand()), sz = lerp(this.minZ, this.maxZ, this.rand());
       const sh = this.height(sx, sz);
       if (sh < 0.5 || this.landSD(sx, sz) > -8 || avoid.some(([ax, az, r]) => Math.hypot(sx - ax, sz - az) < r)) continue;
       made++;
-      const n = 2 + Math.floor(this.rand() * 3);
+      const n = 3 + Math.floor(this.rand() * 3);
       for (let k = 0; k < n; k++) {
         const x = sx + (this.rand() - 0.5) * 12, z = sz + (this.rand() - 0.5) * 12;
         const h = this.height(x, z);

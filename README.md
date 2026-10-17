@@ -19,7 +19,7 @@ Play: https://cbeaver728.github.io/frolf-island/
 - **Bubbles** light up gold when they sit on the aimed path. The higher a bubble floats, the
   bigger it is and the more it's worth (10 near the ground up to 300 way up high).
 - **Spider webs** lie on the ground. Landing on or near one always bounces you high and
-  **doubles** every point for the rest of the shot. Giant webs (2x size) fling you much farther.
+  **doubles** every point for the rest of the shot (stacking up to x4). Giant webs (2x size) fling you much farther.
   Some sit at the end of conveyor belts.
 - **Snakes** pop in and out of holes. Stop near one and it grabs you, shakes, and throws you,
   straight into a web if there's one within 40 m.
