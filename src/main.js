@@ -477,18 +477,18 @@ function planCpu(p) {
   const add = (pt, value, kind, loft = 1) => {
     const d = hdist(p.pos, pt);
     if (d < 8 || d > R) return;
-    if (world.surface(pt.x, pt.z) === 'lava') return;
+    if (['lava', 'sea'].includes(world.surface(pt.x, pt.z))) return;
     const after = hdist(pt, world.cup);
     opts.push({ pt, kind, loft, score: value + (remaining - after) * 2 - urgency * Math.max(0, after - 30) + Math.random() * 150 });
   };
   const toward = (from, to, k) => from.clone().add(tmp.copy(to).sub(from).setY(0).normalize().multiplyScalar(k));
   if (remaining <= R) {
-    opts.push({ pt: world.cup.clone(), kind: 'cup', loft: remaining < 30 ? 2 : 1,
+    opts.push({ pt: world.cup.clone(), kind: 'cup', loft: world.cup.y - p.pos.y > 4 ? 3 : remaining < 30 ? 2 : 1,
       score: HOLE_BONUS[Math.min(p.strokes + 1, HOLE_BONUS.length - 1)] + (firstIn ? 0 : 300) + p.strokes * 150 + Math.random() * 150 });
   } else {
     add(autoTarget(p.pos), 100, 'line');
   }
-  for (const w of world.webs) add(new THREE.Vector3(w.x, w.y, w.z), 450, 'web');
+  for (const w of world.webs) add(new THREE.Vector3(w.x, w.y, w.z), w.next ? 650 : 450, 'web');
   for (const sn of world.snakes) add(toward(new THREE.Vector3(sn.x, sn.y, sn.z), p.pos, 3), 350, 'snake');
   for (const el of world.elephants) add(toward(el.pos.clone(), p.pos, 6.5), 400, 'elephant');
   for (const [px, pz] of world.ponds) add(new THREE.Vector3(px, 0, pz), 280, 'pond');
@@ -607,6 +607,7 @@ function stepShot(dt) {
     case 'slide': slideStep(dt); break;
     case 'pad': padStep(dt); break;
     case 'portal': portalStep(dt); break;
+    case 'tornado': tornadoStep(dt); break;
     case 'sink':
       s.timer -= dt;
       s.pos.lerp(tmp.copy(world.cup).add(tmp2.set(0, -0.9, 0)), Math.min(1, dt * 6));
@@ -674,6 +675,10 @@ function webBounce(w, strong = false) {
   sfx.boing();
   world.burst(tmp2.set(p.x, w.y, p.z), 0xffffff, 6);
   award(50, `${w.big ? 'BIG ' : ''}WEB BOUNCE! ×${s.mult}`, p, 'web');
+  if (w.next && !s.used.has(w.next)) {
+    launchTo(p.clone(), new THREE.Vector3(w.next.x, w.next.y, w.next.z), 62);
+    popup('Chain!', tmp.copy(p).add(tmp2.set(0, 2, 0)), 'web');
+  }
 }
 
 // launch the frog from `from` so it comes down exactly on `target`
@@ -710,6 +715,9 @@ function flyStep(dt) {
   const cx = p.x, cy = p.y + 0.4, cz = p.z;
   checkPickups(cx, cy, cz);
   if (v.y < 0 && checkPortal()) return;
+  for (const tw of world.tornados) {
+    if (!s.used.has(tw) && hdist(p, tw.pos) < 3.2 && p.y - tw.pos.y < 14) return startTornado(tw);
+  }
   for (const w of world.webs) {
     if (s.used.has(w) || !(prevY > w.y && p.y <= w.y && v.y < 0)) continue;
     if (inWeb(w, p.x, p.z)) { webBounce(w); return; }
@@ -792,7 +800,7 @@ function land(h) {
     s.state = 'oob'; s.timer = 1.4;
     sfx.splash();
     world.burst(tmp.set(p.x, 0.3, p.z), world.theme === 'lava' ? 0xff6a1a : 0xffffff, 5);
-    banner(world.theme === 'lava' ? 'SIZZLE! Out of bounds' : 'SPLASH! Out of bounds', 'bad');
+    banner(world.inChasm(p.x, p.z) ? 'Fell in the gap!' : world.theme === 'lava' ? 'SIZZLE! Out of bounds' : 'SPLASH! Out of bounds', 'bad');
     return;
   }
   if (surf === 'lava') return lavaHop();
@@ -872,6 +880,7 @@ function restHere() {
   }
   checkMystery();
   if (checkPortal()) return;
+  for (const tw of world.tornados) if (!s.used.has(tw) && hdist(p, tw.pos) < 4.5) return startTornado(tw);
   if ((s.slides || 0) < 3 && surf !== 'green' && world.normal(p.x, p.z).y < 0.86) return startSlide();
   for (const w of world.webs) {
     if (!s.used.has(w) && inWeb(w, p.x, p.z, 2.5)) {
@@ -912,6 +921,28 @@ function lavaHop() {
   s.lastDir.copy(dirOf(yaw));
   s.state = 'fly'; s.hopping = true; s.hopsLeft = 0; s.contacted = true;
   p.y += 0.05;
+}
+
+// ---------- tornados: whisk the frog up in a spiral and fling it anywhere in the arena ----------
+function startTornado(tw) {
+  const s = shot;
+  s.used.add(tw);
+  s.state = 'tornado'; s.tw = tw; s.et = 0; s.curveDone = true;
+  sfx.leaves(); sfx.boing();
+  award(50, 'TWISTER!', s.pos, 'belt');
+}
+function tornadoStep(dt) {
+  const s = shot, tw = s.tw;
+  s.et += dt;
+  const a = s.et * 9, r = 2 + s.et * 0.8;
+  s.pos.set(tw.pos.x + Math.cos(a) * r, tw.pos.y + 1 + s.et * 6, tw.pos.z + Math.sin(a) * r);
+  s.lastDir.set(-Math.sin(a), 0, Math.cos(a));
+  s.vel.set(-Math.sin(a) * 8, 4, Math.cos(a) * 8);
+  if (s.et > 1.7) {
+    launchTo(s.pos.clone(), randomLanding(tw.pos, 30, 65), 55);
+    popup('Whoosh!', s.pos, 'note');
+    sfx.boing();
+  }
 }
 
 // ---------- lily pads: spin round with the frog on board, then fling it somewhere new ----------

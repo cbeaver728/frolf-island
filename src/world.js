@@ -69,6 +69,8 @@ export class World {
     this.lavaRings = hole.lavaRings || [];
     this.lavaRivers = (hole.lavaRivers || []).map(st => ({ w: st.w, pts: st.pts.map(([x, z]) => ({ x, z })) }));
     this.platforms = hole.platforms || [];
+    this.plateaus = hole.plateaus || [];
+    this.chasms = hole.chasms || [];
     this.iceH = this.icePatches.map(([x, z]) => this.rawHeight(x, z));
     this.streams = (hole.streams || []).map(st => {
       const pts = st.pts.map(([x, z]) => ({ x, z }));
@@ -85,6 +87,7 @@ export class World {
     this.minZ = Math.min(...this.land.map(([, z, r]) => z - r)) - m;
     this.maxZ = Math.max(...this.land.map(([, z, r]) => z + r)) + m;
 
+    this.bubbles = [];
     this.buildTerrain();
     this.buildCup();
     this.buildWebs();
@@ -92,6 +95,9 @@ export class World {
     this.buildPads();
     this.buildPortals();
     this.buildMysteries();
+    this.buildTornados();
+    this.buildTrains();
+    this.buildWaterfalls();
     this.buildElephants();
     this.buildSnakes();
     this.buildTrees();
@@ -129,6 +135,10 @@ export class World {
     for (const [mx, mz, r, mh] of this.mountains) {
       const d = Math.hypot(x - mx, z - mz);
       if (d < r) h += mh * smooth(r, r * 0.36, d);
+    }
+    for (const [px, pz, r, ph] of this.plateaus) {
+      const d = Math.hypot(x - px, z - pz);
+      if (d < r) h += ph * smooth(r, r - 7, d);
     }
     const e = smooth(-8, 8, this.landSD(x, z));
     h = h * (1 - e) - 3.5 * e;
@@ -175,6 +185,10 @@ export class World {
       const d = polyInfo(st.pts, x, z).d, hw = st.w / 2;
       if (d < hw + 2) h = lerp(h, LAVA_Y, smooth(hw + 2, hw - 0.5, d));
     }
+    for (const c of this.chasms) {
+      const d = this.chasmDist(c, x, z), hw = c[4] / 2;
+      if (d < hw + 3) h = lerp(h, -4, smooth(hw + 3, hw - 0.5, d));
+    }
     for (const [px, pz, r] of this.platforms) {
       const d = Math.hypot(x - px, z - pz);
       if (d < r + 1.2) h = lerp(h, LAVA_Y + 1.6, smooth(r + 1.2, r, d));
@@ -202,6 +216,12 @@ export class World {
     }
     return !!this.streamAt(x, z);
   }
+  chasmDist([x1, z1, x2, z2], x, z) {
+    const abx = x2 - x1, abz = z2 - z1;
+    const t = Math.min(1, Math.max(0, ((x - x1) * abx + (z - z1) * abz) / (abx * abx + abz * abz)));
+    return Math.hypot(x - (x1 + abx * t), z - (z1 + abz * t));
+  }
+  inChasm(x, z) { return this.chasms.some(c => this.chasmDist(c, x, z) < c[4] / 2 + 2); }
   onPlatform(x, z) {
     for (const [px, pz, r] of this.platforms) if (Math.hypot(x - px, z - pz) < r + 0.4) return true;
     return false;
@@ -252,6 +272,7 @@ export class World {
       ...this.mountains.map(([x, z, r]) => [x, z, r + 2]),
       ...this.portals.map(p => [p.x, p.z, 6]),
       ...this.mysteries.map(m => [m.x, m.z, 6]),
+      ...(this.hole.trains || []).flatMap(t => t.pts.map(([x, z]) => [x, z, 7])),
     ];
   }
 
@@ -335,6 +356,16 @@ export class World {
   buildWebs() {
     this.webs = [];
     for (const [x, z, a, big] of this.hole.webs || []) this.addWeb(x, z, a, !!big);
+    for (const [x, z, yaw, count, gap] of this.hole.webChains || []) {
+      let prev = null;
+      for (let i = 0; i < count; i++) {
+        this.addWeb(x + Math.sin(yaw) * gap * i, z + Math.cos(yaw) * gap * i, yaw, false);
+        const w = this.webs[this.webs.length - 1];
+        w.chain = true;
+        if (prev) prev.next = w;
+        prev = w;
+      }
+    }
   }
 
   buildBelts() {
@@ -494,7 +525,7 @@ export class World {
       // the arena stays open: trees ring the shore, plus any groves
       if (!g && (sd < -14 || sd > -3)) continue;
       if (Math.hypot(x - this.cup.x, z - this.cup.z) < 18 || Math.hypot(x - this.tee.x, z - this.tee.z) < 10) continue;
-      if (this.inLake(x, z) || ['green', 'ice', 'lava'].includes(this.surface(x, z, h))) continue;
+      if (this.inLake(x, z) || this.inChasm(x, z) || ['green', 'ice', 'lava'].includes(this.surface(x, z, h))) continue;
       if (avoid.some(([ax, az, r]) => Math.hypot(x - ax, z - az) < r)) continue;
       if (this.trees.some(t => Math.hypot(t.x - x, t.z - z) < 5.5)) continue;
       const s = 0.8 + this.rand() * 0.45, yaw = this.rand() * Math.PI * 2;
@@ -519,7 +550,6 @@ export class World {
     this.bubbles.push({ base, pos: base.clone(), value, model: m, r: m.radius, alive: true, phase: this.rand() * 6, pop: -1, water });
   }
   buildBubbles() {
-    this.bubbles = [];
     // the higher a bubble floats, the harder it is to hit and the more it's worth
     const byAlt = (alt) => alt > 21.5 ? 300 : alt > 17 ? 100 : alt > 12 ? 50 : alt > 7.5 ? 30 : this.rand() < 0.5 ? 10 : 20;
     // scattered over the open ground
@@ -585,6 +615,79 @@ export class World {
       }
     }
   }
+  buildTornados() {
+    const color = { tropical: 0xd8cfae, ice: 0xf4f9ff, lava: 0xff7a2a }[this.theme];
+    this.tornados = (this.hole.tornados || []).map(([x, z, r]) => {
+      const m = M.makeTornado(color);
+      this.group.add(m.group);
+      return { cx: x, cz: z, r, pos: new THREE.Vector3(x, 0, z), a: this.rand() * 6.28, sp: 0.18 + this.rand() * 0.12, model: m };
+    });
+  }
+
+  buildTrains() {
+    const color = { tropical: 0xe8402f, ice: 0x2f6fd1, lava: 0x5a4a44 }[this.theme];
+    this.trains = (this.hole.trains || []).map(({ pts, cars = 3, speed = 7 }) => {
+      const curve = new THREE.CatmullRomCurve3(pts.map(([x, z]) => new THREE.Vector3(x, 0, z)), true, 'centripetal');
+      const L = curve.getLength();
+      const n = Math.floor(L / 1.2);
+      // rails and sleepers
+      const sleeper = new THREE.InstancedMesh(new THREE.BoxGeometry(2.6, 0.18, 0.5), M.lam(0x5a3a22), n);
+      const rail = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, 0.16, 1.25), M.lam(0x9ca3af), n * 2);
+      const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+      for (let i = 0; i < n; i++) {
+        const p = curve.getPointAt(i / n), t = curve.getTangentAt(i / n);
+        const y = Math.max(0.2, this.height(p.x, p.z)) + 0.08;
+        q.setFromAxisAngle(up, Math.atan2(t.x, t.z));
+        m.compose(new THREE.Vector3(p.x, y, p.z), q, new THREE.Vector3(1, 1, 1));
+        sleeper.setMatrixAt(i, m);
+        for (const sx of [-0.8, 0.8]) {
+          const off = new THREE.Vector3(sx, 0.15, 0).applyQuaternion(q);
+          m.compose(new THREE.Vector3(p.x + off.x, y + 0.15, p.z + off.z), q, new THREE.Vector3(1, 1, 1));
+          rail.setMatrixAt(i * 2 + (sx > 0 ? 1 : 0), m);
+        }
+      }
+      sleeper.instanceMatrix.needsUpdate = rail.instanceMatrix.needsUpdate = true;
+      this.group.add(sleeper, rail);
+      const train = { curve, L, s: this.rand() * L, speed, cars: [] };
+      for (let i = 0; i < cars + 1; i++) {
+        const car = M.makeTrainCar(i === 0 ? color : 0xffd23f + i * 0x101010, i === 0);
+        this.group.add(car.group);
+        const c = { model: car, gap: i * 5, bubble: null };
+        if (i > 0) {
+          // every car carries a big, valuable balloon
+          this.addBubble(0, 0, 0, 300);
+          c.bubble = this.bubbles[this.bubbles.length - 1];
+          c.bubble.train = true;
+        }
+        train.cars.push(c);
+      }
+      this.placeTrain(train, 0);
+      return train;
+    });
+  }
+  placeTrain(t, dt) {
+    t.s = (t.s + t.speed * dt) % t.L;
+    for (const c of t.cars) {
+      const u = (((t.s - c.gap) % t.L) + t.L) % t.L / t.L;
+      const p = t.curve.getPointAt(u), tan = t.curve.getTangentAt(u);
+      const y = Math.max(0.2, this.height(p.x, p.z)) + 0.3;
+      c.model.group.position.set(p.x, y, p.z);
+      c.model.group.rotation.y = Math.atan2(tan.x, tan.z);
+      if (c.bubble && c.bubble.alive) c.bubble.base.set(p.x, y + 4.6, p.z);
+    }
+  }
+
+  buildWaterfalls() {
+    const kind = { tropical: 'water', ice: 'ice', lava: 'lava' }[this.theme];
+    this.waterfalls = (this.hole.waterfalls || []).map(([x1, z1, x2, z2, w]) => {
+      const top = new THREE.Vector3(x1, this.height(x1, z1) + 0.35, z1);
+      const bottom = new THREE.Vector3(x2, Math.max(0, this.height(x2, z2)) + 0.3, z2);
+      const m = M.makeWaterfall(top, bottom, w, kind);
+      this.group.add(m.group);
+      return m;
+    });
+  }
+
   buildIcebergs() {
     let made = 0, tries = 0;
     while (made < 12 && tries++ < 400) {
@@ -697,6 +800,23 @@ export class World {
       m.tongue.visible = Math.sin(time * 6 + sn.phase) > 0.3;
     }
     for (const b of this.belts) b.model.tex.offset.y -= dt * 7 / b.w;
+    for (const t of this.tornados) {
+      t.a += dt * t.sp;
+      t.pos.set(t.cx + Math.cos(t.a) * t.r, 0, t.cz + Math.sin(t.a * 1.3) * t.r);
+      t.pos.y = Math.max(0, this.height(t.pos.x, t.pos.z));
+      t.model.group.position.copy(t.pos);
+      t.model.rings.forEach((ring, i) => {
+        ring.rotation.y += dt * (6 - i * 0.5);
+        ring.position.x = Math.sin(time * 1.5 + i * 0.6) * i * 0.18;
+      });
+      for (const d of t.model.debris) {
+        d.a += dt * d.sp; d.y = (d.y + dt * 3) % 13;
+        d.mesh.position.set(Math.cos(d.a) * (d.r + d.y * 0.25), d.y, Math.sin(d.a) * (d.r + d.y * 0.25));
+        d.mesh.rotation.set(d.a * 2, d.a, 0);
+      }
+    }
+    for (const t of this.trains) this.placeTrain(t, dt);
+    for (const f of this.waterfalls) if (f.kind !== 'ice') f.tex.offset.y += dt * (f.kind === 'lava' ? 0.25 : 1.2);
     for (const p of this.pads) {
       p.spin = Math.max(0, p.spin - dt * 2);
       p.model.group.rotation.y += dt * (0.15 + p.spin * 9);

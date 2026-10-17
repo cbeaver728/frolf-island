@@ -738,3 +738,86 @@ export function makeSnow(n = 1400, size = 70, color = 0xffffff) {
   pts.userData.size = size;
   return pts;
 }
+
+// ---------- tornado: spinning funnel that wanders about ----------
+export function makeTornado(color = 0xd8cfae) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false });
+  const rings = [];
+  for (let i = 0; i < 7; i++) {
+    const r0 = 0.5 + i * 0.75, r1 = 0.85 + (i + 1) * 0.75;
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r0, 2.3, 16, 1, true), mat);
+    m.position.y = 1.15 + i * 2.15;
+    g.add(m);
+    rings.push(m);
+  }
+  const debris = [];
+  const dmat = lam(new THREE.Color(color).multiplyScalar(0.55).getHex());
+  for (let i = 0; i < 12; i++) {
+    const d = blob(new THREE.BoxGeometry(1, 1, 1), dmat, 0.3, 0.12, 0.25);
+    g.add(d);
+    debris.push({ mesh: d, a: Math.random() * 6.28, y: Math.random() * 12, r: 1 + Math.random() * 4, sp: 3 + Math.random() * 3 });
+  }
+  const dust = new THREE.Mesh(new THREE.CircleGeometry(4.5, 24), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.25, depthWrite: false }));
+  dust.rotation.x = -Math.PI / 2; dust.position.y = 0.1;
+  g.add(dust);
+  return { group: g, rings, debris };
+}
+
+// ---------- train: engine and cars (+z forward) ----------
+export function makeTrainCar(color, engine = false) {
+  const g = new THREE.Group();
+  const box = new THREE.BoxGeometry(1, 1, 1);
+  g.add(blob(box, lam(color), 2.2, engine ? 1.6 : 1.3, 3.8, 0, engine ? 1.4 : 1.25, 0));
+  g.add(blob(box, lam(0x2b2b33), 2.4, 0.3, 4.0, 0, 0.55, 0));
+  for (const z of [-1.3, 1.3]) for (const x of [-1.15, 1.15]) {
+    const w = blob(CYL, lam(0x1c1c22), 0.42, 0.25, 0.42, x, 0.45, z);
+    w.rotation.z = Math.PI / 2;
+    g.add(w);
+  }
+  if (engine) {
+    g.add(blob(CYL, lam(0x2b2b33), 0.3, 1.2, 0.3, 0, 2.6, 1.2));
+    g.add(blob(box, lam(0xffd23f), 1.8, 1.0, 1.2, 0, 2.6, -1.2));
+    g.add(blob(SPH_LO, lam(0xfff6a8), 0.25, 0.25, 0.1, 0, 1.6, 1.95));
+  }
+  return { group: g };
+}
+
+// ---------- waterfall (or icefall / lavafall): a sheet from (top) down to (bottom) ----------
+let fallTex = null;
+export function makeWaterfall(top, bottom, width, kind = 'water') {
+  if (!fallTex) {
+    fallTex = canvasTex(64, 256, (c, w, h) => {
+      for (let x = 0; x < w; x += 2) {
+        const v = 200 + Math.floor(Math.random() * 55);
+        c.fillStyle = `rgba(${v},${v},255,${0.5 + Math.random() * 0.4})`;
+        c.fillRect(x, 0, 2, h);
+        for (let y = 0; y < h; y += 16) {
+          if (Math.random() < 0.4) { c.fillStyle = 'rgba(255,255,255,0.9)'; c.fillRect(x, y, 2, 6 + Math.random() * 10); }
+        }
+      }
+    });
+  }
+  const tex = fallTex.clone();
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  const dir = new THREE.Vector3(bottom.x - top.x, 0, bottom.z - top.z).normalize();
+  const side = new THREE.Vector3(dir.z, 0, -dir.x).multiplyScalar(width / 2);
+  const geo = new THREE.BufferGeometry();
+  const v = [top.clone().add(side), top.clone().sub(side), bottom.clone().add(side), bottom.clone().sub(side)];
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(v.flatMap(p => [p.x, p.y, p.z]), 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 1, 1, 0, 0, 1, 0], 2));
+  geo.setIndex([0, 2, 1, 1, 2, 3]);
+  geo.computeVertexNormals();
+  const color = { water: 0xbfe8ff, ice: 0xdff4ff, lava: 0xff7a22 }[kind];
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, color, transparent: true, opacity: kind === 'ice' ? 0.9 : 0.85,
+    side: THREE.DoubleSide, depthWrite: false }));
+  const g = new THREE.Group();
+  g.add(mesh);
+  const mist = new THREE.Sprite(new THREE.SpriteMaterial({ map: getGlowTex(), color: kind === 'lava' ? 0xffa040 : 0xffffff,
+    transparent: true, opacity: kind === 'ice' ? 0.2 : 0.6, depthWrite: false }));
+  mist.position.copy(bottom).add(new THREE.Vector3(0, 1, 0));
+  mist.scale.set(width * 1.8, 4, 1);
+  g.add(mist);
+  return { group: g, tex, kind };
+}

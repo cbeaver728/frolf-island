@@ -23,6 +23,12 @@ Pick a world on the title screen:
 Best scores are kept per world. The **⛳ Sink it** line (top left) shows what getting in the hole
 is worth on the current shot.
 
+Every hole has its own signature: cups on a mountaintop (Lily Lagoon, Volcano Peak) or up on a
+plateau beside a waterfall (Mammoth Meadow, Snowball Slopes), gaps of open water you hop across on
+stepping stones (Splash Isle, Glacier Gulch), trains circling a mountain with big balloons on
+every car (Grand Frolf Arena, Mammoth Tundra, Inferno Arena), tornados that whisk frogs up and
+fling them anywhere, and web chains where each web tosses you onto the next.
+
 ## How it plays
 
 - **Aim**: put the target anywhere inside your reach (the yellow dotted circle). Tap the
@@ -52,6 +58,11 @@ is worth on the current shot.
   extra-strong launch. **Lily pads** spin you round and fling you somewhere new. **Whirlpools** come in
   pairs: in one, out the other. Belts pay +10 a second.
 - **Mountains** have steep sides you slide down (no points) and treasure bubbles on top.
+- **Web chains**: land on the first web and each one throws you onto the next, doubling as you go.
+- **Tornados** wander about; fly into one (or stop beside it) and it spins you up and flings you
+  somewhere random. **Trains** loop their tracks carrying 300-point balloons: time your shot.
+- **Gaps** of open water cut across some holes: fall in and you are out of bounds, but stepping
+  stones (grippy platforms with bubbles) let you hop across.
 - **"?" circles** with a balloon: land on one for +50 and a random backpack item.
 - **Backpack**: everyone starts each game with one of each item and picks one per shot:
   👀 Fly Eyes (eat flies from twice as far), 🚀 Rocket Launch (~30% farther),
