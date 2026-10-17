@@ -563,7 +563,7 @@ function inWeb(w, x, z, margin = 0) {
 
 // Spider webs are trampolines on the ground: the frog always bounces high, keeps going the way
 // it was heading, and every point after this doubles.
-function webBounce(w) {
+function webBounce(w, strong = false) {
   const s = shot, p = s.pos, v = s.vel;
   s.used.add(w);
   p.y = w.y + 0.02;
@@ -572,8 +572,9 @@ function webBounce(w) {
   if (sp < 0.5) hv.copy(s.lastDir);
   hv.normalize();
   // big webs fling you much farther
-  sp = w.big ? Math.max(sp * 1.3, 13) : Math.max(sp * 1.1, 7);
-  v.set(hv.x * sp, Math.max(-v.y * 0.85, w.big ? 20 : 14), hv.z * sp);
+  // jumping onto a web straight out of the water gets an extra-strong launch
+  sp = w.big ? Math.max(sp * 1.3, strong ? 15 : 13) : Math.max(sp * 1.1, strong ? 9.5 : 7);
+  v.set(hv.x * sp, Math.max(-v.y * 0.85, w.big ? (strong ? 21 : 20) : (strong ? 15 : 14)), hv.z * sp);
   s.lastDir.copy(hv);
   s.mult = Math.min(4, s.mult * 2);      // webs stack, but only up to x4
   w.wobble = 1;
@@ -767,9 +768,12 @@ function restHere() {
   for (const w of world.webs) {
     if (!s.used.has(w) && inWeb(w, p.x, p.z, 2.5)) {
       s.vel.set(s.lastDir.x * 2, -1, s.lastDir.z * 2);
-      return webBounce(w);
+      const strong = !!s.fromWater;
+      s.fromWater = false;
+      return webBounce(w, strong);
     }
   }
+  s.fromWater = false;
   for (const sn of world.snakes) if (!s.used.has(sn) && Math.hypot(p.x - sn.x, p.z - sn.z) < SNAKE_R) return startSnake(sn);
   for (const el of world.elephants) if (!s.used.has(el) && hdist(p, el.pos) < ELEPHANT_R) return startElephant(el);
   if (s.item !== 'sticky' && leapForFly()) return;
@@ -1053,23 +1057,34 @@ function startSwim() {
   let at = { x: p.x, z: p.z };
   const dir = new THREE.Vector3(s.vel.x, 0, s.vel.z);
   if (dir.lengthSq() < 0.25) dir.copy(s.lastDir);
+  dir.normalize();
   const st = world.streamAt(p.x, p.z);
   if (st) {
-    // ride the current down to the end of the stream, then keep going the way it flows
-    const pts = st.stream.pts;
-    for (let i = st.seg + 1; i < pts.length; i++) route.push({ ...pts[i], speed: 9 });
-    const a = pts[pts.length - 2], b = pts[pts.length - 1];
-    dir.set(b.x - a.x, 0, b.z - a.z);
-    at = b;
+    // no current in rivers. If the frog is heading along the river rather than across it,
+    // turn it to cross straight over to the bank on the side it was drifting toward.
+    const a = st.stream.pts[st.seg], b = st.stream.pts[st.seg + 1];
+    const tx = b.x - a.x, tz = b.z - a.z, tl = Math.hypot(tx, tz);
+    const ux = tx / tl, uz = tz / tl;
+    if (Math.abs(dir.x * ux + dir.z * uz) > 0.8) {
+      const side = dir.x * -uz + dir.z * ux >= 0 ? 1 : -1;
+      dir.set(-uz * side, 0, ux * side);
+    }
   }
-  dir.normalize();
   // no turning round: paddle straight ahead until the bank
   let exit = null;
   for (let t = 1; t < 90; t += 0.5) {
     const x = at.x + dir.x * t, z = at.z + dir.z * t, h = world.height(x, z);
     if (h > 0.3) {
       const sf = world.surface(x, z, h);
-      if (sf !== 'sea' && sf !== 'pond') { exit = { x: at.x + dir.x * (t + 1), z: at.z + dir.z * (t + 1) }; break; }
+      if (sf !== 'sea' && sf !== 'pond') {
+        // climb out onto flat ground a little further along the same line, so the frog doesn't
+        // slide straight back down a steep bank
+        for (let u = t + 1; u < t + 8; u += 0.5) {
+          const ex = at.x + dir.x * u, ez = at.z + dir.z * u, eh = world.height(ex, ez);
+          if (eh > 0.3 && world.normal(ex, ez).y > 0.9 && !['sea', 'pond'].includes(world.surface(ex, ez, eh))) { exit = { x: ex, z: ez }; break; }
+        }
+        break;
+      }
     }
     if (h < 0.02 && !world.inLake(x, z)) break;          // open sea ahead: head for the nearest bank instead
   }
@@ -1077,7 +1092,7 @@ function startSwim() {
   s.state = 'swim'; s.route = route; s.tick = 0; s.swimT = 0;
   sfx.splash();
   world.burst(tmp.set(p.x, 0.3, p.z), 0xffffff, 4);
-  if (!s.used.has('swim')) { s.used.add('swim'); award(30, st ? 'RIDE THE STREAM!' : 'SPLASH! SWIM!', p, 'belt'); }
+  if (!s.used.has('swim')) { s.used.add('swim'); award(30, 'SPLASH! SWIM!', p, 'belt'); }
 }
 function swimStep(dt) {
   const s = shot, p = s.pos;
@@ -1090,6 +1105,7 @@ function swimStep(dt) {
     s.route.shift();
     if (!s.route.length || s.swimT > 25) {
       p.y = Math.max(0, world.height(p.x, p.z));
+      s.fromWater = true;
       return restHere();
     }
   } else {

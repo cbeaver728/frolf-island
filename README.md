@@ -26,8 +26,9 @@ Play: https://cbeaver728.github.io/frolf-island/
 - **Elephants**: fly into one and you bonk off it like a tree. Stop near one and it rears up
   with a 3-2-1-GO countdown: press on GO for up to +300, or lose 100 for bad timing. Then it
   throws you, half the time at the hole and half the time anywhere.
-- **Water**: the frog swims straight across (no turning round) for +10 a second; streams carry
-  you along. **Lily pads** spin you round and fling you somewhere new. **Whirlpools** come in
+- **Water**: the frog swims in a straight line (no turning round, no river current) for +10 a
+  second; pointed along a river, it swims straight across instead. A web at the bank gives an
+  extra-strong launch. **Lily pads** spin you round and fling you somewhere new. **Whirlpools** come in
   pairs: in one, out the other. Belts pay +10 a second.
 - **Mountains** have steep sides you slide down (no points) and treasure bubbles on top.
 - **"?" circles** with a balloon: land on one for +50 and a random backpack item.
